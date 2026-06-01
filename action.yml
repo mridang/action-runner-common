@@ -46,7 +46,11 @@ inputs:
   docker-cache-key:
     description: >
       Override the cache key passed to ScribeMD/docker-cache. When empty,
-      a sensible default is derived from runner.os and the workflow job.
+      a sensible default is derived from runner.os and the workflow name.
+      Note: the default deliberately excludes the job name so that all
+      jobs in a single workflow share one Docker image cache. Different
+      workflows get separate caches (ScribeMD does not support
+      restore-keys, so a single global key would either thrash or snowball).
     required: false
     default: ''
   docker-cache-read-only:
@@ -88,7 +92,7 @@ runs:
         if [ -n "${{ inputs.docker-cache-key }}" ]; then
           echo "value=${{ inputs.docker-cache-key }}" >> "$GITHUB_OUTPUT"
         else
-          echo "value=docker-cache-${{ runner.os }}-${{ github.workflow }}-${{ github.job }}" >> "$GITHUB_OUTPUT"
+          echo "value=docker-cache-${{ runner.os }}-${{ github.workflow }}" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Prepare Docker cache
