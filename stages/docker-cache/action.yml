@@ -18,6 +18,21 @@ inputs:
       If "true", restore the cache but do not save it.
     required: false
     default: 'false'
+  max-fraction:
+    description: >
+      Fraction of free disk to use as the cache budget at post-step
+      time. Float between 0 and 1. Defaults to 0.6 (leaves 40% headroom
+      for the actions/cache compression and any subsequent post-steps).
+    required: false
+    default: '0.6'
+  free-disk:
+    description: >
+      If "true", remove well-known pre-installed bloat from the runner
+      (Android SDK, .NET, Haskell, CodeQL, PyPy, etc.) during the pre-
+      step to free ~20-25 GB. Off by default because it adds ~30s and
+      isn't needed on most jobs.
+    required: false
+    default: 'false'
 
 outputs:
   cache-hit:

@@ -1,7 +1,10 @@
 'use strict';
 
 var node_fs = require('node:fs');
+var promises = require('node:fs/promises');
+var node_http = require('node:http');
 var node_path = require('node:path');
+require('node:stream/promises');
 
 var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 
@@ -81393,43 +81396,139 @@ var cacheExports = requireCache();
 
 var execExports = requireExec();
 
-/**
- * Path to the tarball produced by `docker save` and uploaded to the
- * GitHub Actions cache. Lives under RUNNER_TEMP so it is cleaned up
- * automatically at the end of the job.
- */
+/** Tarball location for the cache payload. Under RUNNER_TEMP. */
 const TARBALL_PATH = node_path.join(process.env.RUNNER_TEMP || '/tmp', 'runner-common-docker-cache.tar');
 /** State keys used to pass data from main.ts to post.ts. */
 const STATE = {
-    /** The resolved cache key. */
     KEY: 'cache-key',
-    /** Whether the pre-step restored the cache on its primary key. */
     HIT: 'cache-hit',
-    /**
-     * JSON-encoded list of images that existed BEFORE the cache restore.
-     * Used to compute the delta saved in the post-step.
-     */
+    /** JSON list of image identifiers present BEFORE restore. */
     PRE_EXISTING: 'pre-existing-images',
 };
+/** Path to the docker daemon unix socket. Overridable for tests. */
+const DOCKER_SOCKET = process.env.DOCKER_HOST?.replace(/^unix:\/\//, '') || '/var/run/docker.sock';
+/** Bytes of free disk on the filesystem holding the given path. */
+async function freeDiskBytes(path) {
+    const stat = await promises.statfs(node_path.dirname(path));
+    return Number(stat.bavail) * Number(stat.bsize);
+}
 /**
- * List the images currently present in the docker daemon, formatted as
- * "repo:tag" (or the image ID for dangling images).
+ * Minimal HTTP client for the Docker Engine API over a unix socket.
+ * Avoids dockerode (which depends on ssh2 → native cpufeatures.node and
+ * does not bundle cleanly with rollup).
+ */
+function dockerRequest(opts) {
+    return new Promise((resolve, reject) => {
+        const req = node_http.request({
+            socketPath: DOCKER_SOCKET,
+            method: opts.method,
+            path: opts.path,
+            headers: opts.headers,
+        }, (res) => {
+            resolve({ statusCode: res.statusCode || 0, stream: res });
+        });
+        req.on('error', reject);
+        if (opts.body) {
+            opts.body.pipe(req);
+        }
+        else {
+            req.end();
+        }
+    });
+}
+async function dockerGetJson(path) {
+    const { statusCode, stream } = await dockerRequest({ method: 'GET', path });
+    const chunks = [];
+    for await (const c of stream)
+        chunks.push(c);
+    const body = Buffer.concat(chunks).toString('utf8');
+    if (statusCode < 200 || statusCode >= 300) {
+        throw new Error(`Docker API ${path} returned ${statusCode}: ${body.slice(0, 200)}`);
+    }
+    return JSON.parse(body);
+}
+/**
+ * List all images visible to the docker daemon. Each entry's `name` is
+ * its first usable RepoTag; dangling images (no usable tag) are
+ * dropped because they cannot be restored by name on the next run.
  */
 async function listImages() {
-    const { stdout } = await execExports.getExecOutput('docker', [
-        'image',
-        'list',
-        '--format',
-        '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}',
-    ], { silent: true });
-    return stdout
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
+    const raw = await dockerGetJson('/images/json');
+    const result = [];
+    for (const img of raw) {
+        const tags = (img.RepoTags || []).filter((t) => t && t !== '<none>:<none>');
+        if (tags.length === 0)
+            continue;
+        result.push({ name: tags[0], size: Number(img.Size || 0) });
+    }
+    return result;
 }
-/** `docker load` images from the given tarball path. */
+/**
+ * Load images from a tarball via the Docker Engine API
+ * (`POST /images/load`). Streams the file to the socket.
+ */
 async function loadImages(tarballPath) {
-    await execExports.exec('docker', ['load', '--input', tarballPath]);
+    const body = node_fs.createReadStream(tarballPath);
+    const { statusCode, stream } = await dockerRequest({
+        method: 'POST',
+        path: '/images/load?quiet=true',
+        body,
+        headers: { 'Content-Type': 'application/x-tar' },
+    });
+    // Drain the response (the daemon streams progress lines).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for await (const _chunk of stream) {
+        /* ignore */
+    }
+    if (statusCode < 200 || statusCode >= 300) {
+        throw new Error(`Docker /images/load returned ${statusCode}`);
+    }
+}
+/**
+ * Free runner disk space by removing well-known pre-installed bloat.
+ * Mirrors `jlumbroso/free-disk-space` but inline in Node so consumers
+ * don't need an extra composite step. Best-effort — failures warn.
+ */
+async function freeDisk() {
+    const PATHS = [
+        '/usr/share/dotnet',
+        '/usr/local/lib/android',
+        '/opt/ghc',
+        '/usr/local/share/boost',
+        '/usr/local/share/powershell',
+        '/usr/local/share/chromium',
+        '/opt/hostedtoolcache/CodeQL',
+        '/opt/hostedtoolcache/PyPy',
+    ];
+    const before = await freeDiskBytes('/');
+    for (const p of PATHS) {
+        try {
+            await promises.rm(p, { recursive: true, force: true });
+        }
+        catch {
+            try {
+                await execExports.exec('sudo', ['rm', '-rf', p], { silent: true });
+            }
+            catch (err) {
+                coreExports.warning(`free-disk: could not remove ${p}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+    }
+    const after = await freeDiskBytes('/');
+    coreExports.info(`free-disk: ${formatBytes(before)} → ${formatBytes(after)} free (+${formatBytes(after - before)})`);
+}
+/** Human-friendly byte formatter for logs. */
+function formatBytes(n) {
+    if (n < 1024)
+        return `${n}B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let v = n / 1024;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i++;
+    }
+    return `${v.toFixed(2)}${units[i]}`;
 }
 
 /* istanbul ignore next */
@@ -81440,9 +81539,15 @@ async function run() {
             throw new Error('Input "key" must not be empty.');
         }
         coreExports.saveState(STATE.KEY, key);
+        const freeDiskFlag = coreExports.getInput('free-disk').trim().toLowerCase() === 'true';
+        if (freeDiskFlag) {
+            coreExports.startGroup('Freeing runner disk space');
+            await freeDisk();
+            coreExports.endGroup();
+        }
         coreExports.startGroup('Recording pre-existing Docker images');
         const preExisting = await listImages();
-        coreExports.saveState(STATE.PRE_EXISTING, JSON.stringify(preExisting));
+        coreExports.saveState(STATE.PRE_EXISTING, JSON.stringify(preExisting.map((i) => i.name)));
         coreExports.info(`Pre-existing images: ${preExisting.length}`);
         coreExports.endGroup();
         coreExports.startGroup('Restoring Docker image cache');
@@ -81467,7 +81572,6 @@ async function run() {
         coreExports.endGroup();
     }
     catch (err) {
-        // Don't fail the job; the cache stage is best-effort.
         coreExports.warning(`docker-cache restore failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 }

@@ -2,8 +2,10 @@ name: Runner Common Setup
 
 description: >
   Common first-step setup applied to every workflow — runner hardening
-  via step-security/harden-runner and Docker image layer caching via
-  ScribeMD/docker-cache. Pin this once at the top of every job.
+  via step-security/harden-runner, generic XDG cache over ~/.cache, and
+  Docker image layer caching via an in-house bin-packing cache stage
+  built on @actions/cache@v4 + the Docker Engine API. Pin this once at
+  the top of every job.
 
 author: mridang
 branding:
@@ -39,24 +41,39 @@ inputs:
 
   docker-cache:
     description: >
-      Enable Docker image caching via ScribeMD/docker-cache. Set to
-      "false" to skip the docker-cache step entirely.
+      Enable Docker image caching. Set to "false" to skip entirely.
     required: false
     default: 'true'
   docker-cache-key:
     description: >
-      Override the cache key passed to ScribeMD/docker-cache. When empty,
-      a sensible default is derived from runner.os and the workflow name.
-      Note: the default deliberately excludes the job name so that all
-      jobs in a single workflow share one Docker image cache. Different
-      workflows get separate caches (ScribeMD does not support
-      restore-keys, so a single global key would either thrash or snowball).
+      Override the cache key. When empty, a sensible default is derived
+      from runner.os and a slugified workflow name. The default
+      deliberately excludes the job name so all jobs in a workflow share
+      one cache; different workflows get separate caches.
     required: false
     default: ''
   docker-cache-read-only:
     description: >
       If "true", restore the Docker cache but do not save it on cache miss.
       Recommended for PR branches to avoid cache pollution.
+    required: false
+    default: 'false'
+  docker-cache-max-fraction:
+    description: >
+      Fraction of free disk to use as the docker-cache budget at post-step
+      time. Float between 0 and 1. Default 0.6. The post-step bin-packs
+      the delta of newly-pulled images (first-fit-decreasing) into this
+      budget and skips any that don't fit, never failing the job on
+      disk-full.
+    required: false
+    default: '0.6'
+  docker-cache-free-disk:
+    description: >
+      If "true", remove ~20-25 GB of well-known pre-installed bloat from
+      the runner (Android SDK, .NET, Haskell, CodeQL, PyPy, etc.) before
+      the cache restore. Use this on workflows that pull many large
+      images (e.g. polyglot test matrices) and would otherwise blow the
+      runner's ~14 GB free-disk budget. Adds ~30 seconds.
     required: false
     default: 'false'
 
@@ -117,3 +134,5 @@ runs:
       with:
         key: ${{ steps.docker-cache-key.outputs.value }}
         read-only: ${{ inputs.docker-cache-read-only }}
+        max-fraction: ${{ inputs.docker-cache-max-fraction }}
+        free-disk: ${{ inputs.docker-cache-free-disk }}

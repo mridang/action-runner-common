@@ -8,7 +8,15 @@ import {
 } from '@actions/core';
 import { saveCache } from '@actions/cache';
 import { existsSync, unlinkSync } from 'node:fs';
-import { STATE, TARBALL_PATH, listImages, saveImages } from './lib.js';
+import {
+  STATE,
+  TARBALL_PATH,
+  binPack,
+  exportImages,
+  formatBytes,
+  freeDiskBytes,
+  listImages,
+} from './lib.js';
 
 /* istanbul ignore next */
 async function run(): Promise<void> {
@@ -33,14 +41,22 @@ async function run(): Promise<void> {
       return;
     }
 
-    const preExisting = new Set<string>(
-      JSON.parse(getState(STATE.PRE_EXISTING) || '[]'),
+    const fractionInput = getInput('max-fraction').trim();
+    let fraction = fractionInput ? parseFloat(fractionInput) : 0.6;
+    if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1) {
+      warning(`Invalid max-fraction "${fractionInput}"; falling back to 0.6.`);
+      fraction = 0.6;
+    }
+
+    const preExistingArr: string[] = JSON.parse(
+      getState(STATE.PRE_EXISTING) || '[]',
     );
+    const preExisting = new Set(preExistingArr);
 
     startGroup('Listing current Docker images');
     const current = await listImages();
-    const newImages = current.filter((img) => !preExisting.has(img));
-    info(`Current: ${current.length}, new: ${newImages.length}`);
+    const newImages = current.filter((img) => !preExisting.has(img.name));
+    info(`Current: ${current.length}, new (delta): ${newImages.length}`);
     endGroup();
 
     if (newImages.length === 0) {
@@ -48,11 +64,40 @@ async function run(): Promise<void> {
       return;
     }
 
-    startGroup(`docker save ${newImages.length} image(s) → ${TARBALL_PATH}`);
+    startGroup('Bin-packing delta against available disk');
+    const free = await freeDiskBytes(TARBALL_PATH);
+    const budget = Math.floor(free * fraction);
+    info(
+      `Free disk: ${formatBytes(free)}, fraction: ${fraction}, budget: ${formatBytes(budget)}`,
+    );
+    const { include, skip, totalBytes } = binPack(newImages, budget);
+    info(
+      `Including ${include.length}/${newImages.length} images (${formatBytes(totalBytes)} / ${formatBytes(budget)} budget)`,
+    );
+    if (skip.length) {
+      warning(
+        `Skipping ${skip.length} image(s) that did not fit the cache budget:\n` +
+          skip.map((s) => `  - ${s.name} (${formatBytes(s.size)})`).join('\n'),
+      );
+    }
+    endGroup();
+
+    if (include.length === 0) {
+      info(
+        'No images fit within the budget; skipping save entirely (no tarball written).',
+      );
+      return;
+    }
+
+    startGroup(`Exporting ${include.length} image(s) → ${TARBALL_PATH}`);
     if (existsSync(TARBALL_PATH)) {
       unlinkSync(TARBALL_PATH);
     }
-    await saveImages(newImages, TARBALL_PATH);
+    await exportImages(
+      include.map((i) => i.name),
+      TARBALL_PATH,
+    );
+    info(`Tarball written: ${TARBALL_PATH}`);
     endGroup();
 
     startGroup(`Saving cache under key: ${key}`);
@@ -60,12 +105,17 @@ async function run(): Promise<void> {
       const cacheId = await saveCache([TARBALL_PATH], key);
       info(`Cache saved (id=${cacheId}).`);
     } catch (err) {
-      // Two common cases:
-      // 1. Concurrent job already saved under the same key (409). Fine.
-      // 2. Cache service error. Surface as a warning, not a failure.
       warning(
         `Cache save did not complete: ${err instanceof Error ? err.message : String(err)}`,
       );
+    } finally {
+      // Delete the tarball to free disk for any subsequent post-step
+      // (e.g., the generic ~/.cache cache save that runs after us).
+      try {
+        if (existsSync(TARBALL_PATH)) unlinkSync(TARBALL_PATH);
+      } catch {
+        /* ignore */
+      }
     }
     endGroup();
   } catch (err) {

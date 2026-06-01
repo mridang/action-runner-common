@@ -9,7 +9,13 @@ import {
 } from '@actions/core';
 import { restoreCache } from '@actions/cache';
 import { existsSync } from 'node:fs';
-import { STATE, TARBALL_PATH, listImages, loadImages } from './lib.js';
+import {
+  STATE,
+  TARBALL_PATH,
+  freeDisk,
+  listImages,
+  loadImages,
+} from './lib.js';
 
 /* istanbul ignore next */
 async function run(): Promise<void> {
@@ -20,9 +26,19 @@ async function run(): Promise<void> {
     }
     saveState(STATE.KEY, key);
 
+    const freeDiskFlag = getInput('free-disk').trim().toLowerCase() === 'true';
+    if (freeDiskFlag) {
+      startGroup('Freeing runner disk space');
+      await freeDisk();
+      endGroup();
+    }
+
     startGroup('Recording pre-existing Docker images');
     const preExisting = await listImages();
-    saveState(STATE.PRE_EXISTING, JSON.stringify(preExisting));
+    saveState(
+      STATE.PRE_EXISTING,
+      JSON.stringify(preExisting.map((i) => i.name)),
+    );
     info(`Pre-existing images: ${preExisting.length}`);
     endGroup();
 
@@ -47,7 +63,6 @@ async function run(): Promise<void> {
     }
     endGroup();
   } catch (err) {
-    // Don't fail the job; the cache stage is best-effort.
     warning(
       `docker-cache restore failed: ${err instanceof Error ? err.message : String(err)}`,
     );
