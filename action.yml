@@ -106,7 +106,14 @@ runs:
 
     - name: Prepare Docker cache
       if: ${{ inputs.docker-cache == 'true' }}
-      uses: ./stages/docker-cache
+      # GitHub Actions resolves `uses: ./...` from composite actions
+      # against GITHUB_WORKSPACE, NOT against the composite's own repo
+      # (see https://github.com/actions/runner/issues/646). We work around
+      # that by referencing the sub-action via its full repo path pinned
+      # to the same floating major tag this action publishes under. The
+      # release workflow updates `v1` after every release, so the sub-
+      # action always tracks the same major as the root.
+      uses: mridang/action-runner-common/stages/docker-cache@v1
       with:
         key: ${{ steps.docker-cache-key.outputs.value }}
         read-only: ${{ inputs.docker-cache-read-only }}
