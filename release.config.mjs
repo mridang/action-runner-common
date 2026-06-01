@@ -13,7 +13,11 @@ export default {
     [
       '@semantic-release/github',
       {
-        assets: ['action.yml', 'dist/**', 'stages/**/dist/**'],
+        // Drop release-asset uploads entirely: consumers pin to a tag and
+        // checkout the repo, which already contains action.yml + dist. The
+        // multi-stage layout has two main.cjs files (root + stages/) which
+        // collide on basename when uploaded as release assets (422).
+        assets: [],
       },
     ],
     [
