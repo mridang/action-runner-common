@@ -1,0 +1,76 @@
+name: Runner Common Setup
+
+description: >
+  Common first-step setup applied to every workflow — runner hardening
+  via step-security/harden-runner and Docker image layer caching via
+  ScribeMD/docker-cache. Pin this once at the top of every job.
+
+author: mridang
+branding:
+  color: blue
+  icon: shield
+
+inputs:
+  harden-egress-policy:
+    description: >
+      Passed to step-security/harden-runner. One of "audit" or "block".
+    required: false
+    default: 'audit'
+  harden-allowed-endpoints:
+    description: >
+      Newline-separated list of allowed endpoints, used when
+      harden-egress-policy is "block".
+    required: false
+    default: ''
+  harden-disable-sudo:
+    description: >
+      Passed to step-security/harden-runner. Disables sudo on the runner.
+    required: false
+    default: 'false'
+
+  docker-cache:
+    description: >
+      Enable Docker image caching via ScribeMD/docker-cache. Set to
+      "false" to skip the docker-cache step entirely.
+    required: false
+    default: 'true'
+  docker-cache-key:
+    description: >
+      Override the cache key passed to ScribeMD/docker-cache. When empty,
+      a sensible default is derived from runner.os and the workflow job.
+    required: false
+    default: ''
+  docker-cache-read-only:
+    description: >
+      If "true", restore the Docker cache but do not save it on cache miss.
+      Recommended for PR branches to avoid cache pollution.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Harden runner
+      uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+      with:
+        egress-policy: ${{ inputs.harden-egress-policy }}
+        allowed-endpoints: ${{ inputs.harden-allowed-endpoints }}
+        disable-sudo: ${{ inputs.harden-disable-sudo }}
+
+    - name: Resolve Docker cache key
+      if: ${{ inputs.docker-cache == 'true' }}
+      id: docker-cache-key
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.docker-cache-key }}" ]; then
+          echo "value=${{ inputs.docker-cache-key }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "value=docker-cache-${{ runner.os }}-${{ github.workflow }}-${{ github.job }}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Prepare Docker cache
+      if: ${{ inputs.docker-cache == 'true' }}
+      uses: ScribeMD/docker-cache@fb28c93772363301b8d0a6072ce850224b73f74e # 0.5.0
+      with:
+        key: ${{ steps.docker-cache-key.outputs.value }}
+        read-only: ${{ inputs.docker-cache-read-only }}
