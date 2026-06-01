@@ -106,7 +106,7 @@ runs:
 
     - name: Prepare Docker cache
       if: ${{ inputs.docker-cache == 'true' }}
-      uses: ScribeMD/docker-cache@fb28c93772363301b8d0a6072ce850224b73f74e # 0.5.0
+      uses: ./stages/docker-cache
       with:
         key: ${{ steps.docker-cache-key.outputs.value }}
         read-only: ${{ inputs.docker-cache-read-only }}

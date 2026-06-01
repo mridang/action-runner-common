@@ -13,13 +13,18 @@ export default {
     [
       '@semantic-release/github',
       {
-        assets: ['action.yml', 'dist/**'],
+        assets: ['action.yml', 'dist/**', 'stages/**/dist/**'],
       },
     ],
     [
       '@semantic-release/git',
       {
-        assets: ['package.json', 'package-lock.json', 'dist'],
+        assets: [
+          'package.json',
+          'package-lock.json',
+          'dist',
+          'stages/**/dist',
+        ],
         message:
           'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}',
       },

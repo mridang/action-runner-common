@@ -1,7 +1,7 @@
 import json from '@rollup/plugin-json';
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
-import { dirname, resolve as r } from 'node:path';
+import { dirname, resolve as r, dirname as dn } from 'node:path';
 import { readFileSync } from 'node:fs';
 import * as nodules from 'node:module';
 import typescript from '@rollup/plugin-typescript';
@@ -43,11 +43,10 @@ const inlinePackageJsonPlugin = {
   },
 };
 
-// noinspection JSUnusedGlobalSymbols,SpellCheckingInspection
-export default (configOverrides = {}) => ({
-  input: 'src/main.ts',
+const makeConfig = (input, output, configOverrides = {}) => ({
+  input,
   output: {
-    file: 'dist/main.cjs',
+    file: output,
     format: 'cjs',
     sourcemap: true,
     inlineDynamicImports: true,
@@ -56,10 +55,10 @@ export default (configOverrides = {}) => ({
       // Return 'default' to ensure they are treated as pure CommonJS modules,
       // without extra '.default' wrappers, matching Node.js's native behavior.
       if (NODE_BUILTINS.includes(id)) {
-        return 'default'; // CHANGED from `false` to `'default'`
+        return 'default';
       }
-      // For all other modules (e.g., 'jwt-decode'), return 'esModule' to ensure
-      // they get the `__esModule: true` flag, allowing `import Foo from 'foo'` to work.
+      // For all other modules, return 'esModule' so they get the
+      // `__esModule: true` flag, allowing `import Foo from 'foo'` to work.
       return 'esModule';
     },
   },
@@ -93,8 +92,24 @@ export default (configOverrides = {}) => ({
       tsconfig: './tsconfig.json',
       module: 'NodeNext',
       moduleResolution: 'NodeNext',
+      outDir: dn(output),
       ...configOverrides.typescript,
     }),
   ],
   external: NODE_BUILTINS,
 });
+
+// noinspection JSUnusedGlobalSymbols,SpellCheckingInspection
+export default (configOverrides = {}) => [
+  makeConfig('src/main.ts', 'dist/main.cjs', configOverrides),
+  makeConfig(
+    'stages/docker-cache/src/main.ts',
+    'stages/docker-cache/dist/main.cjs',
+    configOverrides,
+  ),
+  makeConfig(
+    'stages/docker-cache/src/post.ts',
+    'stages/docker-cache/dist/post.cjs',
+    configOverrides,
+  ),
+];

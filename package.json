@@ -42,7 +42,9 @@
   "homepage": "https://github.com/mridang/action-runner-common",
   "bugs": "https://github.com/mridang/action-runner-common/issues",
   "dependencies": {
-    "@actions/core": "^1.11.1"
+    "@actions/cache": "^4.0.5",
+    "@actions/core": "^1.11.1",
+    "@actions/exec": "^1.1.1"
   },
   "devDependencies": {
     "@commitlint/config-conventional": "^19.8.1",

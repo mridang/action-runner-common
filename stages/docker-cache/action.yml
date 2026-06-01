@@ -1,0 +1,30 @@
+name: Docker image cache (internal)
+
+description: >
+  Internal stage of mridang/action-runner-common. Caches docker images
+  pulled during the job via @actions/cache@v4 and `docker save`/`docker
+  load`. Intended to be called only by the root composite — its public
+  surface (inputs `key`, `read-only`) is not part of the action's public
+  contract.
+
+inputs:
+  key:
+    description: >
+      The cache key. The root composite slugifies the workflow name and
+      passes it here.
+    required: true
+  read-only:
+    description: >
+      If "true", restore the cache but do not save it.
+    required: false
+    default: 'false'
+
+outputs:
+  cache-hit:
+    description: '"true" if the cache was restored on the primary key.'
+
+runs:
+  using: node24
+  main: dist/main.cjs
+  post: dist/post.cjs
+  post-if: success()
