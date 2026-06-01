@@ -28,6 +28,15 @@ inputs:
     required: false
     default: 'false'
 
+  generic-cache:
+    description: >
+      Enable a generic always-on cache over ~/.cache (XDG cache home).
+      Tools that respect XDG_CACHE_HOME (pip, Go build cache, gh CLI,
+      Helm, oras, others) get cross-run persistence for free. Set to
+      "false" to skip.
+    required: false
+    default: 'true'
+
   docker-cache:
     description: >
       Enable Docker image caching via ScribeMD/docker-cache. Set to
@@ -56,6 +65,20 @@ runs:
         egress-policy: ${{ inputs.harden-egress-policy }}
         allowed-endpoints: ${{ inputs.harden-allowed-endpoints }}
         disable-sudo: ${{ inputs.harden-disable-sudo }}
+
+    - name: Ensure ~/.cache exists
+      if: ${{ inputs.generic-cache == 'true' }}
+      shell: bash
+      run: mkdir -p "$HOME/.cache"
+
+    - name: Generic cache (~/.cache)
+      if: ${{ inputs.generic-cache == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache
+        key: runner-common-cache-${{ runner.os }}-${{ github.run_id }}
+        restore-keys: |
+          runner-common-cache-${{ runner.os }}-
 
     - name: Resolve Docker cache key
       if: ${{ inputs.docker-cache == 'true' }}

@@ -5,6 +5,7 @@ A composite GitHub Action that bundles the common first-step setup applied at th
 ## Features
 
 - **Runner Hardening**: Invokes [`step-security/harden-runner`](https://github.com/step-security/harden-runner) with a configurable egress policy (default `audit`) to observe or enforce outbound traffic from the runner.
+- **Generic XDG Cache**: Restores and saves `~/.cache` across runs via `actions/cache`. Tools that respect `XDG_CACHE_HOME` (pip, Go build cache, `gh` CLI, Helm, oras, and others) get cross-run persistence with zero per-tool configuration.
 - **Docker Image Cache**: Invokes [`ScribeMD/docker-cache`](https://github.com/ScribeMD/docker-cache) to persist pulled and built Docker images across workflow runs, dramatically reducing pull time on subsequent jobs.
 - **Pinned by SHA**: Every upstream action is pinned to a full commit SHA, not a floating tag, so consumer workflows never have to audit the dependency graph themselves.
 - **Forward-Compatible Surface**: Future common setup steps land here behind toggle inputs, so consumer workflows pick them up by bumping the tag rather than editing each repo individually.
@@ -50,6 +51,7 @@ This action will harden the runner, prepare the Docker layer cache, and (on post
 - `harden-egress-policy` (optional, default: `'audit'`): Passed to `step-security/harden-runner`. One of `'audit'` or `'block'`. `'audit'` observes outbound traffic and reports it; `'block'` enforces an allowlist via `harden-allowed-endpoints`. Start with `'audit'` and graduate to `'block'` once the report is clean.
 - `harden-allowed-endpoints` (optional, default: `''`): Newline-separated list of allowed endpoints, used when `harden-egress-policy` is `'block'`. Each entry is `host:port`, e.g. `api.github.com:443`.
 - `harden-disable-sudo` (optional, default: `'false'`): Passed to `step-security/harden-runner`. When `'true'`, disables `sudo` on the runner. Recommended for jobs that don't need elevated privileges.
+- `generic-cache` (optional, default: `'true'`): When `'false'`, skips the generic `~/.cache` cache step entirely.
 - `docker-cache` (optional, default: `'true'`): When `'false'`, skips the Docker cache step entirely. Set this on jobs that don't touch Docker.
 - `docker-cache-key` (optional, default: `''`): Override the cache key passed to `ScribeMD/docker-cache`. When empty, a sensible default is derived from `runner.os`, `github.workflow`, and `github.job`.
 - `docker-cache-read-only` (optional, default: `'false'`): When `'true'`, restores the Docker cache but does not save it on cache miss. Recommended for PR branches to avoid cache pollution from untrusted code.
@@ -63,6 +65,7 @@ None
 What this action actually does, in order:
 
 - **`step-security/harden-runner@0634a26`** (v2.12.0): Installs the StepSecurity agent and applies the configured egress policy. Surfaces a per-job runtime summary linking to the policy report.
+- **Generic XDG cache (`actions/cache@v4`)**: Restores `~/.cache` from the most recent matching cache and saves it back at job end. Save key is `runner-common-cache-${{ runner.os }}-${{ github.run_id }}`; `restore-keys` falls back to `runner-common-cache-${{ runner.os }}-` so every run picks up the latest available cache. Old entries fall off GitHub's per-repo 10 GB cache LRU naturally.
 - **`ScribeMD/docker-cache@fb28c93`** (0.5.0): Restores cached Docker images on the pre-step and saves them back on the post-step via `actions/cache`. The cache key defaults to `docker-cache-${{ runner.os }}-${{ github.workflow }}-${{ github.job }}`.
 
 Both upstream actions are pinned by full commit SHA. Updating an upstream means bumping the SHA in [`action.yml`](action.yml) and cutting a new release of this action — consumers do not need to audit the change themselves.
