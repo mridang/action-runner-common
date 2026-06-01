@@ -26,5 +26,5 @@ export default {
     ],
     'semantic-release-major-tag',
   ],
-  repositoryUrl: 'git+https://github.com/mridang/action-semantic-release.git',
+  repositoryUrl: 'git+https://github.com/mridang/action-runner-common.git',
 };
