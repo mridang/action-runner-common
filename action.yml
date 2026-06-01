@@ -88,11 +88,20 @@ runs:
       if: ${{ inputs.docker-cache == 'true' }}
       id: docker-cache-key
       shell: bash
+      env:
+        OVERRIDE_KEY: ${{ inputs.docker-cache-key }}
+        WORKFLOW: ${{ github.workflow }}
+        OS: ${{ runner.os }}
       run: |
-        if [ -n "${{ inputs.docker-cache-key }}" ]; then
-          echo "value=${{ inputs.docker-cache-key }}" >> "$GITHUB_OUTPUT"
+        if [ -n "$OVERRIDE_KEY" ]; then
+          echo "value=$OVERRIDE_KEY" >> "$GITHUB_OUTPUT"
         else
-          echo "value=docker-cache-${{ runner.os }}-${{ github.workflow }}" >> "$GITHUB_OUTPUT"
+          # Slugify the workflow display name: GitHub's cache service rejects
+          # keys containing spaces or non-ASCII chars (e.g. em-dashes) with a
+          # 400. Replace any run of non-alphanumeric chars with a single dash
+          # and trim leading/trailing dashes.
+          SLUG=$(printf '%s' "$WORKFLOW" | LC_ALL=C tr -cs 'a-zA-Z0-9' '-' | sed 's/^-*//; s/-*$//')
+          echo "value=docker-cache-$OS-$SLUG" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Prepare Docker cache
