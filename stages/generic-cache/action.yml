@@ -30,4 +30,8 @@ runs:
   using: node24
   main: dist/main.cjs
   post: dist/post.cjs
-  post-if: success()
+  # Save the cache regardless of whether the job's user-level steps
+  # succeeded. A failed test should not throw away the cache from work
+  # that completed (image pulls, ~/.cache contents). actions/cache@v4
+  # uses the same "always" semantics internally.
+  post-if: always()
