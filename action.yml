@@ -92,7 +92,7 @@ runs:
       # Sub-action path: same `./` resolution quirk as docker-cache —
       # composite local paths resolve against GITHUB_WORKSPACE, not the
       # composite's repo. Pin to the floating major tag.
-      uses: mridang/action-runner-common/stages/generic-cache@v1
+      uses: mridang/action-runner-common/stages/generic-cache@feat/generic-cache-stage
       with:
         key: runner-common-cache-${{ runner.os }}-${{ github.run_id }}
         restore-keys: |
@@ -127,7 +127,7 @@ runs:
       # to the same floating major tag this action publishes under. The
       # release workflow updates `v1` after every release, so the sub-
       # action always tracks the same major as the root.
-      uses: mridang/action-runner-common/stages/docker-cache@v1
+      uses: mridang/action-runner-common/stages/docker-cache@feat/generic-cache-stage
       with:
         key: ${{ steps.docker-cache-key.outputs.value }}
         read-only: ${{ inputs.docker-cache-read-only }}
