@@ -87,16 +87,13 @@ runs:
         allowed-endpoints: ${{ inputs.harden-allowed-endpoints }}
         disable-sudo: ${{ inputs.harden-disable-sudo }}
 
-    - name: Ensure ~/.cache exists
-      if: ${{ inputs.generic-cache == 'true' }}
-      shell: bash
-      run: mkdir -p "$HOME/.cache"
-
     - name: Generic cache (~/.cache)
       if: ${{ inputs.generic-cache == 'true' }}
-      uses: actions/cache@v4
+      # Sub-action path: same `./` resolution quirk as docker-cache —
+      # composite local paths resolve against GITHUB_WORKSPACE, not the
+      # composite's repo. Pin to the floating major tag.
+      uses: mridang/action-runner-common/stages/generic-cache@v1
       with:
-        path: ~/.cache
         key: runner-common-cache-${{ runner.os }}-${{ github.run_id }}
         restore-keys: |
           runner-common-cache-${{ runner.os }}-

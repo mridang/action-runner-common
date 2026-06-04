@@ -1,0 +1,33 @@
+name: Generic XDG cache (internal)
+
+description: >
+  Internal stage of mridang/action-runner-common. Caches ~/.cache via
+  @actions/cache@v4 + tolerant tar (--ignore-failed-read,
+  --warning=no-file-changed), so the post-step never fails when a
+  container, ryuk cleanup, JVM cache, etc. is still writing during the
+  cache save.
+
+inputs:
+  key:
+    description: 'Cache key for the primary save/restore.'
+    required: true
+  restore-keys:
+    description: >
+      Newline-separated prefixes used as fallbacks when the primary
+      key misses.
+    required: false
+    default: ''
+  read-only:
+    description: 'If "true", restore but do not save.'
+    required: false
+    default: 'false'
+
+outputs:
+  cache-hit:
+    description: '"true" if the cache was restored on the primary key.'
+
+runs:
+  using: node24
+  main: dist/main.cjs
+  post: dist/post.cjs
+  post-if: success()
