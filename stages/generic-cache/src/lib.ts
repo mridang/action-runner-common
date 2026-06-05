@@ -1,4 +1,4 @@
-import { info } from '@actions/core';
+import { endGroup, info, startGroup } from '@actions/core';
 import { exec } from '@actions/exec';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -130,6 +130,84 @@ export async function reportDirSize(label: string, dir: string): Promise<void> {
   } catch (err) {
     info(
       `${label}: could not measure ${dir}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/**
+ * Whether debug diagnostics should run. Enabled by the explicit
+ * `debug` input OR by GitHub's step-debug logging (RUNNER_DEBUG=1,
+ * set when you re-run a job with "Enable debug logging").
+ */
+export function debugEnabled(inputValue: string): boolean {
+  return (
+    inputValue.trim().toLowerCase() === 'true' ||
+    process.env.RUNNER_DEBUG === '1'
+  );
+}
+
+/**
+ * Print a per-node size breakdown of the top of a directory tree,
+ * sorted largest-first. Helps answer "what is actually in the cache
+ * and what's taking up space." Uses `sudo -n du` so root-owned
+ * subtrees are measured; falls back to plain `du`.
+ *
+ * @param dir       directory to inspect
+ * @param maxDepth  how many levels deep to break down (default 2)
+ * @param topN      cap the number of rows logged (default 40)
+ *
+ * Best-effort: never throws.
+ */
+export async function reportDirTree(
+  dir: string,
+  maxDepth = 2,
+  topN = 40,
+): Promise<void> {
+  try {
+    let out = '';
+    const opts = {
+      silent: true,
+      ignoreReturnCode: true,
+      listeners: {
+        stdout: (d: Buffer) => {
+          out += d.toString();
+        },
+      },
+    };
+    // GNU du: bytes + depth-limited. Tab-separated "<bytes>\t<path>".
+    let code = await exec(
+      'sudo',
+      ['-n', 'du', '-b', `--max-depth=${maxDepth}`, dir],
+      opts,
+    );
+    if (code !== 0) {
+      out = '';
+      await exec('du', ['-b', `--max-depth=${maxDepth}`, dir], opts);
+    }
+    const rows = out
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => {
+        const tab = l.indexOf('\t');
+        const bytes = parseInt(l.slice(0, tab), 10);
+        return { bytes, path: l.slice(tab + 1) };
+      })
+      .filter((r) => Number.isFinite(r.bytes))
+      .sort((a, b) => b.bytes - a.bytes)
+      .slice(0, topN);
+
+    startGroup(`Cache tree (top ${rows.length}, depth ${maxDepth}) — ${dir}`);
+    for (const r of rows) {
+      info(`${formatBytes(r.bytes).padStart(10)}  ${r.path}`);
+    }
+    if (rows.length === topN) {
+      info(`… (truncated to top ${topN} by size)`);
+    }
+    endGroup();
+  } catch (err) {
+    info(
+      `Cache tree report failed for ${dir}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }

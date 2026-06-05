@@ -12,8 +12,10 @@ import {
   STATE,
   TARBALL_PATH,
   cachePath,
+  debugEnabled,
   formatBytes,
   reportDirSize,
+  reportDirTree,
   tarTolerant,
 } from './lib.js';
 
@@ -48,6 +50,9 @@ async function run(): Promise<void> {
 
     startGroup(`Tar ${dir} → ${TARBALL_PATH} (tolerant of live writers)`);
     await reportDirSize('Cache dir size (being saved)', dir);
+    if (debugEnabled(getInput('debug'))) {
+      await reportDirTree(dir);
+    }
     if (existsSync(TARBALL_PATH)) {
       try {
         unlinkSync(TARBALL_PATH);

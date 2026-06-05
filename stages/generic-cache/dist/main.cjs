@@ -81450,6 +81450,70 @@ async function reportDirSize(label, dir) {
         coreExports.info(`${label}: could not measure ${dir}: ${err instanceof Error ? err.message : String(err)}`);
     }
 }
+/**
+ * Whether debug diagnostics should run. Enabled by the explicit
+ * `debug` input OR by GitHub's step-debug logging (RUNNER_DEBUG=1,
+ * set when you re-run a job with "Enable debug logging").
+ */
+function debugEnabled(inputValue) {
+    return (inputValue.trim().toLowerCase() === 'true' ||
+        process.env.RUNNER_DEBUG === '1');
+}
+/**
+ * Print a per-node size breakdown of the top of a directory tree,
+ * sorted largest-first. Helps answer "what is actually in the cache
+ * and what's taking up space." Uses `sudo -n du` so root-owned
+ * subtrees are measured; falls back to plain `du`.
+ *
+ * @param dir       directory to inspect
+ * @param maxDepth  how many levels deep to break down (default 2)
+ * @param topN      cap the number of rows logged (default 40)
+ *
+ * Best-effort: never throws.
+ */
+async function reportDirTree(dir, maxDepth = 2, topN = 40) {
+    try {
+        let out = '';
+        const opts = {
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (d) => {
+                    out += d.toString();
+                },
+            },
+        };
+        // GNU du: bytes + depth-limited. Tab-separated "<bytes>\t<path>".
+        let code = await execExports.exec('sudo', ['-n', 'du', '-b', `--max-depth=${maxDepth}`, dir], opts);
+        if (code !== 0) {
+            out = '';
+            await execExports.exec('du', ['-b', `--max-depth=${maxDepth}`, dir], opts);
+        }
+        const rows = out
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .map((l) => {
+            const tab = l.indexOf('\t');
+            const bytes = parseInt(l.slice(0, tab), 10);
+            return { bytes, path: l.slice(tab + 1) };
+        })
+            .filter((r) => Number.isFinite(r.bytes))
+            .sort((a, b) => b.bytes - a.bytes)
+            .slice(0, topN);
+        coreExports.startGroup(`Cache tree (top ${rows.length}, depth ${maxDepth}) — ${dir}`);
+        for (const r of rows) {
+            coreExports.info(`${formatBytes(r.bytes).padStart(10)}  ${r.path}`);
+        }
+        if (rows.length === topN) {
+            coreExports.info(`… (truncated to top ${topN} by size)`);
+        }
+        coreExports.endGroup();
+    }
+    catch (err) {
+        coreExports.info(`Cache tree report failed for ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
 /** Human-readable byte formatter. */
 function formatBytes(n) {
     if (n < 1024)
@@ -81490,6 +81554,9 @@ async function run() {
                 await untar(TARBALL_PATH, dir + '/..');
                 coreExports.info(`Cache extracted into ${dir}`);
                 await reportDirSize('Restored cache dir size', dir);
+                if (debugEnabled(coreExports.getInput('debug'))) {
+                    await reportDirTree(dir);
+                }
             }
             else {
                 coreExports.warning('Cache restore reported success but tarball is missing on disk.');

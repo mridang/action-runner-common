@@ -38,6 +38,13 @@ inputs:
       "false" to skip.
     required: false
     default: 'true'
+  generic-cache-debug:
+    description: >
+      If "true" (or when step-debug logging is on, RUNNER_DEBUG=1),
+      print a per-node size breakdown of the top of ~/.cache on both
+      restore and save, to show what is taking up cache space.
+    required: false
+    default: 'false'
 
   docker-cache:
     description: >
@@ -97,6 +104,7 @@ runs:
         key: runner-common-cache-${{ runner.os }}-${{ github.run_id }}
         restore-keys: |
           runner-common-cache-${{ runner.os }}-
+        debug: ${{ inputs.generic-cache-debug }}
 
     - name: Resolve Docker cache key
       if: ${{ inputs.docker-cache == 'true' }}

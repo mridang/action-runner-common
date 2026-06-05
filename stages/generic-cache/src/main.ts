@@ -10,7 +10,15 @@ import {
 import { restoreCache } from '@actions/cache';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { STATE, TARBALL_PATH, cachePath, reportDirSize, untar } from './lib.js';
+import {
+  STATE,
+  TARBALL_PATH,
+  cachePath,
+  debugEnabled,
+  reportDirSize,
+  reportDirTree,
+  untar,
+} from './lib.js';
 
 /* istanbul ignore next */
 async function run(): Promise<void> {
@@ -41,6 +49,9 @@ async function run(): Promise<void> {
         await untar(TARBALL_PATH, dir + '/..');
         info(`Cache extracted into ${dir}`);
         await reportDirSize('Restored cache dir size', dir);
+        if (debugEnabled(getInput('debug'))) {
+          await reportDirTree(dir);
+        }
       } else {
         warning(
           'Cache restore reported success but tarball is missing on disk.',

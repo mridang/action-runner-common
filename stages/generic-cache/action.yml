@@ -21,6 +21,13 @@ inputs:
     description: 'If "true", restore but do not save.'
     required: false
     default: 'false'
+  debug:
+    description: >
+      If "true" (or when the runner has step-debug logging enabled,
+      RUNNER_DEBUG=1), print a per-node size breakdown of the top of
+      the cache tree on both restore and save.
+    required: false
+    default: 'false'
 
 outputs:
   cache-hit:
