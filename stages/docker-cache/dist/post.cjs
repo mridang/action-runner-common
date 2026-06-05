@@ -81556,6 +81556,11 @@ async function run() {
         coreExports.info(`Free disk: ${formatBytes(free)}, fraction: ${fraction}, budget: ${formatBytes(budget)}`);
         const { include, skip, totalBytes } = binPack(newImages, budget);
         coreExports.info(`Including ${include.length}/${newImages.length} images (${formatBytes(totalBytes)} / ${formatBytes(budget)} budget)`);
+        // Always log exactly which images are being cached and how big each
+        // is (largest-first), so it's obvious what fills the docker cache.
+        for (const img of [...include].sort((a, b) => b.size - a.size)) {
+            coreExports.info(`  ${formatBytes(img.size).padStart(10)}  ${img.name}`);
+        }
         if (skip.length) {
             coreExports.warning(`Skipping ${skip.length} image(s) that did not fit the cache budget:\n` +
                 skip.map((s) => `  - ${s.name} (${formatBytes(s.size)})`).join('\n'));
