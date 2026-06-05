@@ -81466,6 +81466,56 @@ async function tarTolerant(dirToArchive, outputTar) {
     coreExports.info('sudo tar unavailable; falling back to plain tar.');
     await execExports.exec('tar', tarArgs, { ignoreReturnCode: true });
 }
+/**
+ * Log the on-disk size of a directory (apparent total bytes), so every
+ * run records what was saved/restored. Uses `sudo -n du` so root-owned
+ * subtrees (e.g. files written by containers running as root) are
+ * counted; falls back to plain `du` when sudo is unavailable.
+ *
+ * Best-effort: never throws — diagnostics must not fail the job.
+ */
+async function reportDirSize(label, dir) {
+    try {
+        let out = '';
+        const opts = {
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (d) => {
+                    out += d.toString();
+                },
+            },
+        };
+        let code = await execExports.exec('sudo', ['-n', 'du', '-sb', dir], opts);
+        if (code !== 0) {
+            out = '';
+            code = await execExports.exec('du', ['-sb', dir], opts);
+        }
+        const bytes = parseInt(out.split(/\s+/)[0] || '0', 10);
+        if (Number.isFinite(bytes) && bytes > 0) {
+            coreExports.info(`${label}: ${dir} = ${formatBytes(bytes)} (${bytes} bytes)`);
+        }
+        else {
+            coreExports.info(`${label}: ${dir} = unknown (du returned no size)`);
+        }
+    }
+    catch (err) {
+        coreExports.info(`${label}: could not measure ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+/** Human-readable byte formatter. */
+function formatBytes(n) {
+    if (n < 1024)
+        return `${n}B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let v = n / 1024;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i++;
+    }
+    return `${v.toFixed(2)}${units[i]}`;
+}
 
 /* istanbul ignore next */
 async function run() {
@@ -81491,6 +81541,7 @@ async function run() {
             return;
         }
         coreExports.startGroup(`Tar ${dir} → ${TARBALL_PATH} (tolerant of live writers)`);
+        await reportDirSize('Cache dir size (being saved)', dir);
         if (node_fs.existsSync(TARBALL_PATH)) {
             try {
                 node_fs.unlinkSync(TARBALL_PATH);
@@ -81506,7 +81557,7 @@ async function run() {
             return;
         }
         const size = node_fs.statSync(TARBALL_PATH).size;
-        coreExports.info(`Tarball size: ${size} bytes`);
+        coreExports.info(`Tarball size: ${formatBytes(size)} (${size} bytes)`);
         coreExports.endGroup();
         coreExports.startGroup(`Saving cache under key: ${key}`);
         try {

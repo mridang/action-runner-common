@@ -95,3 +95,54 @@ export async function untar(
   await mkdir(intoParent, { recursive: true });
   await exec('tar', ['-xf', tarPath, '-C', intoParent]);
 }
+
+/**
+ * Log the on-disk size of a directory (apparent total bytes), so every
+ * run records what was saved/restored. Uses `sudo -n du` so root-owned
+ * subtrees (e.g. files written by containers running as root) are
+ * counted; falls back to plain `du` when sudo is unavailable.
+ *
+ * Best-effort: never throws — diagnostics must not fail the job.
+ */
+export async function reportDirSize(label: string, dir: string): Promise<void> {
+  try {
+    let out = '';
+    const opts = {
+      silent: true,
+      ignoreReturnCode: true,
+      listeners: {
+        stdout: (d: Buffer) => {
+          out += d.toString();
+        },
+      },
+    };
+    let code = await exec('sudo', ['-n', 'du', '-sb', dir], opts);
+    if (code !== 0) {
+      out = '';
+      code = await exec('du', ['-sb', dir], opts);
+    }
+    const bytes = parseInt(out.split(/\s+/)[0] || '0', 10);
+    if (Number.isFinite(bytes) && bytes > 0) {
+      info(`${label}: ${dir} = ${formatBytes(bytes)} (${bytes} bytes)`);
+    } else {
+      info(`${label}: ${dir} = unknown (du returned no size)`);
+    }
+  } catch (err) {
+    info(
+      `${label}: could not measure ${dir}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/** Human-readable byte formatter. */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n}B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(2)}${units[i]}`;
+}

@@ -81413,6 +81413,56 @@ async function untar(tarPath, intoParent) {
     await promises.mkdir(intoParent, { recursive: true });
     await execExports.exec('tar', ['-xf', tarPath, '-C', intoParent]);
 }
+/**
+ * Log the on-disk size of a directory (apparent total bytes), so every
+ * run records what was saved/restored. Uses `sudo -n du` so root-owned
+ * subtrees (e.g. files written by containers running as root) are
+ * counted; falls back to plain `du` when sudo is unavailable.
+ *
+ * Best-effort: never throws — diagnostics must not fail the job.
+ */
+async function reportDirSize(label, dir) {
+    try {
+        let out = '';
+        const opts = {
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (d) => {
+                    out += d.toString();
+                },
+            },
+        };
+        let code = await execExports.exec('sudo', ['-n', 'du', '-sb', dir], opts);
+        if (code !== 0) {
+            out = '';
+            code = await execExports.exec('du', ['-sb', dir], opts);
+        }
+        const bytes = parseInt(out.split(/\s+/)[0] || '0', 10);
+        if (Number.isFinite(bytes) && bytes > 0) {
+            coreExports.info(`${label}: ${dir} = ${formatBytes(bytes)} (${bytes} bytes)`);
+        }
+        else {
+            coreExports.info(`${label}: ${dir} = unknown (du returned no size)`);
+        }
+    }
+    catch (err) {
+        coreExports.info(`${label}: could not measure ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+/** Human-readable byte formatter. */
+function formatBytes(n) {
+    if (n < 1024)
+        return `${n}B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let v = n / 1024;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i++;
+    }
+    return `${v.toFixed(2)}${units[i]}`;
+}
 
 /* istanbul ignore next */
 async function run() {
@@ -81439,6 +81489,7 @@ async function run() {
             if (node_fs.existsSync(TARBALL_PATH)) {
                 await untar(TARBALL_PATH, dir + '/..');
                 coreExports.info(`Cache extracted into ${dir}`);
+                await reportDirSize('Restored cache dir size', dir);
             }
             else {
                 coreExports.warning('Cache restore reported success but tarball is missing on disk.');

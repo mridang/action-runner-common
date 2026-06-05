@@ -8,7 +8,14 @@ import {
 } from '@actions/core';
 import { saveCache } from '@actions/cache';
 import { existsSync, statSync, unlinkSync } from 'node:fs';
-import { STATE, TARBALL_PATH, cachePath, tarTolerant } from './lib.js';
+import {
+  STATE,
+  TARBALL_PATH,
+  cachePath,
+  formatBytes,
+  reportDirSize,
+  tarTolerant,
+} from './lib.js';
 
 /* istanbul ignore next */
 async function run(): Promise<void> {
@@ -40,6 +47,7 @@ async function run(): Promise<void> {
     }
 
     startGroup(`Tar ${dir} → ${TARBALL_PATH} (tolerant of live writers)`);
+    await reportDirSize('Cache dir size (being saved)', dir);
     if (existsSync(TARBALL_PATH)) {
       try {
         unlinkSync(TARBALL_PATH);
@@ -54,7 +62,7 @@ async function run(): Promise<void> {
       return;
     }
     const size = statSync(TARBALL_PATH).size;
-    info(`Tarball size: ${size} bytes`);
+    info(`Tarball size: ${formatBytes(size)} (${size} bytes)`);
     endGroup();
 
     startGroup(`Saving cache under key: ${key}`);
