@@ -38,6 +38,13 @@ inputs:
       "false" to skip.
     required: false
     default: 'true'
+  generic-cache-debug:
+    description: >
+      If "true" (or when step-debug logging is on, RUNNER_DEBUG=1),
+      print a per-node size breakdown of the top of ~/.cache on both
+      restore and save, to show what is taking up cache space.
+    required: false
+    default: 'false'
 
   docker-cache:
     description: >
@@ -87,19 +94,17 @@ runs:
         allowed-endpoints: ${{ inputs.harden-allowed-endpoints }}
         disable-sudo: ${{ inputs.harden-disable-sudo }}
 
-    - name: Ensure ~/.cache exists
-      if: ${{ inputs.generic-cache == 'true' }}
-      shell: bash
-      run: mkdir -p "$HOME/.cache"
-
     - name: Generic cache (~/.cache)
       if: ${{ inputs.generic-cache == 'true' }}
-      uses: actions/cache@v4
+      # Sub-action path: same `./` resolution quirk as docker-cache —
+      # composite local paths resolve against GITHUB_WORKSPACE, not the
+      # composite's repo. Pin to the floating major tag.
+      uses: mridang/action-runner-common/stages/generic-cache@feat/generic-cache-stage
       with:
-        path: ~/.cache
         key: runner-common-cache-${{ runner.os }}-${{ github.run_id }}
         restore-keys: |
           runner-common-cache-${{ runner.os }}-
+        debug: ${{ inputs.generic-cache-debug }}
 
     - name: Resolve Docker cache key
       if: ${{ inputs.docker-cache == 'true' }}
@@ -130,7 +135,7 @@ runs:
       # to the same floating major tag this action publishes under. The
       # release workflow updates `v1` after every release, so the sub-
       # action always tracks the same major as the root.
-      uses: mridang/action-runner-common/stages/docker-cache@v1
+      uses: mridang/action-runner-common/stages/docker-cache@feat/generic-cache-stage
       with:
         key: ${{ steps.docker-cache-key.outputs.value }}
         read-only: ${{ inputs.docker-cache-read-only }}

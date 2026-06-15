@@ -112,4 +112,14 @@ export default (configOverrides = {}) => [
     'stages/docker-cache/dist/post.cjs',
     configOverrides,
   ),
+  makeConfig(
+    'stages/generic-cache/src/main.ts',
+    'stages/generic-cache/dist/main.cjs',
+    configOverrides,
+  ),
+  makeConfig(
+    'stages/generic-cache/src/post.ts',
+    'stages/generic-cache/dist/post.cjs',
+    configOverrides,
+  ),
 ];

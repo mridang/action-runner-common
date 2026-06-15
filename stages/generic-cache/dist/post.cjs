@@ -1,10 +1,8 @@
 'use strict';
 
 var node_fs = require('node:fs');
-var promises = require('node:fs/promises');
-var node_http = require('node:http');
+require('node:fs/promises');
 var node_path = require('node:path');
-var promises$1 = require('node:stream/promises');
 
 var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 
@@ -81394,114 +81392,182 @@ function requireCache () {
 
 var cacheExports = requireCache();
 
-requireExec();
+var execExports = requireExec();
 
-/** Tarball location for the cache payload. Under RUNNER_TEMP. */
-const TARBALL_PATH = node_path.join(process.env.RUNNER_TEMP || '/tmp', 'runner-common-docker-cache.tar');
-/** State keys used to pass data from main.ts to post.ts. */
+/**
+ * Path to the tarball that holds the cached `~/.cache` snapshot.
+ * Lives under RUNNER_TEMP so it is cleaned up at job end.
+ */
+const TARBALL_PATH = node_path.join(process.env.RUNNER_TEMP || '/tmp', 'runner-common-generic-cache.tar');
+/** State keys passed from main.ts to post.ts. */
 const STATE = {
     KEY: 'cache-key',
     HIT: 'cache-hit',
-    /** JSON list of image identifiers present BEFORE restore. */
-    PRE_EXISTING: 'pre-existing-images',
 };
-/** Path to the docker daemon unix socket. Overridable for tests. */
-const DOCKER_SOCKET = process.env.DOCKER_HOST?.replace(/^unix:\/\//, '') || '/var/run/docker.sock';
-/** Bytes of free disk on the filesystem holding the given path. */
-async function freeDiskBytes(path) {
-    const stat = await promises.statfs(node_path.dirname(path));
-    return Number(stat.bavail) * Number(stat.bsize);
+/** Path the stage caches. Resolved from $HOME (or HOME env var). */
+function cachePath() {
+    return node_path.join(process.env.HOME || '/home/runner', '.cache');
 }
 /**
- * Minimal HTTP client for the Docker Engine API over a unix socket.
- * Avoids dockerode (which depends on ssh2 → native cpufeatures.node and
- * does not bundle cleanly with rollup).
+ * Tar a directory tolerantly: a writer modifying or deleting a file
+ * mid-read does not abort the archive. Designed for live directories
+ * like `~/.cache` where docker containers, ryuk cleanup, JVM caches,
+ * etc. may still be writing during the post-step.
+ *
+ * Privilege handling:
+ *   When test containers run as root and bind-mount into a host path
+ *   like `~/.cache/openapi-gen/<lang>`, the files they write end up
+ *   owned by root on the host. A plain `tar` running as the runner
+ *   user would hit EACCES on those files and (with --ignore-failed-read)
+ *   silently skip them — making the cache useless.
+ *
+ *   We try `sudo -n tar` first so tar runs as root and can read
+ *   everything. On GitHub-hosted runners passwordless sudo is always
+ *   available; on self-hosted runners without it, sudo fails fast and
+ *   we fall back to a plain `tar` (root-owned files get skipped, which
+ *   is the same behavior as before — graceful degradation).
+ *
+ *   After `sudo tar`, we `sudo chown` the output back to the runner
+ *   user so `@actions/cache.saveCache()` (which runs as the runner)
+ *   can read it without elevation.
+ *
+ * Flags:
+ *   --ignore-failed-read     : skip files that vanish mid-read
+ *   --warning=no-file-changed: silence "file changed as we read it"
  */
-function dockerRequest(opts) {
-    return new Promise((resolve, reject) => {
-        const req = node_http.request({
-            socketPath: DOCKER_SOCKET,
-            method: opts.method,
-            path: opts.path,
-            headers: opts.headers,
-        }, (res) => {
-            resolve({ statusCode: res.statusCode || 0, stream: res });
+async function tarTolerant(dirToArchive, outputTar) {
+    // -C parent and archive the basename so paths inside the tar are
+    // relative ("./.cache/...") — that way `tar -xf` into the same parent
+    // restores cleanly on the next run.
+    const parent = node_path.join(dirToArchive, '..');
+    const base = dirToArchive.split('/').filter(Boolean).pop();
+    const tarArgs = [
+        '-cf',
+        outputTar,
+        '--ignore-failed-read',
+        '--warning=no-file-changed',
+        '-C',
+        parent,
+        base,
+    ];
+    // Try elevated tar first (non-interactive). exit 0 = sudo worked.
+    // Any non-zero from sudo (no NOPASSWD, no sudo, etc.) falls through.
+    const sudoExit = await execExports.exec('sudo', ['-n', 'tar', ...tarArgs], {
+        ignoreReturnCode: true,
+    });
+    if (sudoExit === 0) {
+        const uid = process.getuid?.() ?? 1001;
+        const gid = process.getgid?.() ?? 1001;
+        await execExports.exec('sudo', ['-n', 'chown', `${uid}:${gid}`, outputTar], {
+            ignoreReturnCode: true,
         });
-        req.on('error', reject);
-        if (opts.body) {
-            opts.body.pipe(req);
+        return;
+    }
+    coreExports.info('sudo tar unavailable; falling back to plain tar.');
+    await execExports.exec('tar', tarArgs, { ignoreReturnCode: true });
+}
+/**
+ * Log the on-disk size of a directory (apparent total bytes), so every
+ * run records what was saved/restored. Uses `sudo -n du` so root-owned
+ * subtrees (e.g. files written by containers running as root) are
+ * counted; falls back to plain `du` when sudo is unavailable.
+ *
+ * Best-effort: never throws — diagnostics must not fail the job.
+ */
+async function reportDirSize(label, dir) {
+    try {
+        let out = '';
+        const opts = {
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (d) => {
+                    out += d.toString();
+                },
+            },
+        };
+        let code = await execExports.exec('sudo', ['-n', 'du', '-sb', dir], opts);
+        if (code !== 0) {
+            out = '';
+            code = await execExports.exec('du', ['-sb', dir], opts);
+        }
+        const bytes = parseInt(out.split(/\s+/)[0] || '0', 10);
+        if (Number.isFinite(bytes) && bytes > 0) {
+            coreExports.info(`${label}: ${dir} = ${formatBytes(bytes)} (${bytes} bytes)`);
         }
         else {
-            req.end();
-        }
-    });
-}
-async function dockerGetJson(path) {
-    const { statusCode, stream } = await dockerRequest({ method: 'GET', path });
-    const chunks = [];
-    for await (const c of stream)
-        chunks.push(c);
-    const body = Buffer.concat(chunks).toString('utf8');
-    if (statusCode < 200 || statusCode >= 300) {
-        throw new Error(`Docker API ${path} returned ${statusCode}: ${body.slice(0, 200)}`);
-    }
-    return JSON.parse(body);
-}
-/**
- * List all images visible to the docker daemon. Each entry's `name` is
- * its first usable RepoTag; dangling images (no usable tag) are
- * dropped because they cannot be restored by name on the next run.
- */
-async function listImages() {
-    const raw = await dockerGetJson('/images/json');
-    const result = [];
-    for (const img of raw) {
-        const tags = (img.RepoTags || []).filter((t) => t && t !== '<none>:<none>');
-        if (tags.length === 0)
-            continue;
-        result.push({ name: tags[0], size: Number(img.Size || 0) });
-    }
-    return result;
-}
-/**
- * First-fit-decreasing bin-pack. Sorts images by size descending and
- * greedily includes each one whose size fits in the remaining budget.
- */
-function binPack(images, budgetBytes) {
-    const sorted = [...images].sort((a, b) => b.size - a.size);
-    const include = [];
-    const skip = [];
-    let totalBytes = 0;
-    for (const img of sorted) {
-        if (totalBytes + img.size <= budgetBytes) {
-            include.push(img);
-            totalBytes += img.size;
-        }
-        else {
-            skip.push(img);
+            coreExports.info(`${label}: ${dir} = unknown (du returned no size)`);
         }
     }
-    return { include, skip, totalBytes };
+    catch (err) {
+        coreExports.info(`${label}: could not measure ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
 }
 /**
- * Export the named images to a single tarball via the Docker Engine API
- * (`GET /images/get?names=...`). Streams directly to disk.
+ * Whether debug diagnostics should run. Enabled by the explicit
+ * `debug` input OR by GitHub's step-debug logging (RUNNER_DEBUG=1,
+ * set when you re-run a job with "Enable debug logging").
  */
-async function exportImages(names, tarballPath) {
-    if (names.length === 0) {
-        throw new Error('exportImages called with no names');
-    }
-    const qs = names.map((n) => `names=${encodeURIComponent(n)}`).join('&');
-    const { statusCode, stream } = await dockerRequest({
-        method: 'GET',
-        path: `/images/get?${qs}`,
-    });
-    if (statusCode < 200 || statusCode >= 300) {
-        throw new Error(`Docker /images/get returned ${statusCode}`);
-    }
-    await promises$1.pipeline(stream, node_fs.createWriteStream(tarballPath));
+function debugEnabled(inputValue) {
+    return (inputValue.trim().toLowerCase() === 'true' ||
+        process.env.RUNNER_DEBUG === '1');
 }
-/** Human-friendly byte formatter for logs. */
+/**
+ * Print a per-node size breakdown of the top of a directory tree,
+ * sorted largest-first. Helps answer "what is actually in the cache
+ * and what's taking up space." Uses `sudo -n du` so root-owned
+ * subtrees are measured; falls back to plain `du`.
+ *
+ * @param dir       directory to inspect
+ * @param maxDepth  how many levels deep to break down (default 2)
+ * @param topN      cap the number of rows logged (default 40)
+ *
+ * Best-effort: never throws.
+ */
+async function reportDirTree(dir, maxDepth = 2, topN = 40) {
+    try {
+        let out = '';
+        const opts = {
+            silent: true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (d) => {
+                    out += d.toString();
+                },
+            },
+        };
+        // GNU du: bytes + depth-limited. Tab-separated "<bytes>\t<path>".
+        let code = await execExports.exec('sudo', ['-n', 'du', '-b', `--max-depth=${maxDepth}`, dir], opts);
+        if (code !== 0) {
+            out = '';
+            await execExports.exec('du', ['-b', `--max-depth=${maxDepth}`, dir], opts);
+        }
+        const rows = out
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .map((l) => {
+            const tab = l.indexOf('\t');
+            const bytes = parseInt(l.slice(0, tab), 10);
+            return { bytes, path: l.slice(tab + 1) };
+        })
+            .filter((r) => Number.isFinite(r.bytes))
+            .sort((a, b) => b.bytes - a.bytes)
+            .slice(0, topN);
+        coreExports.startGroup(`Cache tree (top ${rows.length}, depth ${maxDepth}) — ${dir}`);
+        for (const r of rows) {
+            coreExports.info(`${formatBytes(r.bytes).padStart(10)}  ${r.path}`);
+        }
+        if (rows.length === topN) {
+            coreExports.info(`… (truncated to top ${topN} by size)`);
+        }
+        coreExports.endGroup();
+    }
+    catch (err) {
+        coreExports.info(`Cache tree report failed for ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+/** Human-readable byte formatter. */
 function formatBytes(n) {
     if (n < 1024)
         return `${n}B`;
@@ -81533,49 +81599,32 @@ async function run() {
             coreExports.warning('No cache key recorded by the pre-step; skipping save.');
             return;
         }
-        const fractionInput = coreExports.getInput('max-fraction').trim();
-        let fraction = fractionInput ? parseFloat(fractionInput) : 0.6;
-        if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1) {
-            coreExports.warning(`Invalid max-fraction "${fractionInput}"; falling back to 0.6.`);
-            fraction = 0.6;
-        }
-        const preExistingArr = JSON.parse(coreExports.getState(STATE.PRE_EXISTING) || '[]');
-        const preExisting = new Set(preExistingArr);
-        coreExports.startGroup('Listing current Docker images');
-        const current = await listImages();
-        const newImages = current.filter((img) => !preExisting.has(img.name));
-        coreExports.info(`Current: ${current.length}, new (delta): ${newImages.length}`);
-        coreExports.endGroup();
-        if (newImages.length === 0) {
-            coreExports.info('No new images pulled during this job; nothing to cache.');
+        const dir = cachePath();
+        if (!node_fs.existsSync(dir)) {
+            coreExports.info(`${dir} does not exist; nothing to cache.`);
             return;
         }
-        coreExports.startGroup('Bin-packing delta against available disk');
-        const free = await freeDiskBytes(TARBALL_PATH);
-        const budget = Math.floor(free * fraction);
-        coreExports.info(`Free disk: ${formatBytes(free)}, fraction: ${fraction}, budget: ${formatBytes(budget)}`);
-        const { include, skip, totalBytes } = binPack(newImages, budget);
-        coreExports.info(`Including ${include.length}/${newImages.length} images (${formatBytes(totalBytes)} / ${formatBytes(budget)} budget)`);
-        // Always log exactly which images are being cached and how big each
-        // is (largest-first), so it's obvious what fills the docker cache.
-        for (const img of [...include].sort((a, b) => b.size - a.size)) {
-            coreExports.info(`  ${formatBytes(img.size).padStart(10)}  ${img.name}`);
+        coreExports.startGroup(`Tar ${dir} → ${TARBALL_PATH} (tolerant of live writers)`);
+        await reportDirSize('Cache dir size (being saved)', dir);
+        if (debugEnabled(coreExports.getInput('debug'))) {
+            await reportDirTree(dir);
         }
-        if (skip.length) {
-            coreExports.warning(`Skipping ${skip.length} image(s) that did not fit the cache budget:\n` +
-                skip.map((s) => `  - ${s.name} (${formatBytes(s.size)})`).join('\n'));
-        }
-        coreExports.endGroup();
-        if (include.length === 0) {
-            coreExports.info('No images fit within the budget; skipping save entirely (no tarball written).');
-            return;
-        }
-        coreExports.startGroup(`Exporting ${include.length} image(s) → ${TARBALL_PATH}`);
         if (node_fs.existsSync(TARBALL_PATH)) {
-            node_fs.unlinkSync(TARBALL_PATH);
+            try {
+                node_fs.unlinkSync(TARBALL_PATH);
+            }
+            catch {
+                /* ignore */
+            }
         }
-        await exportImages(include.map((i) => i.name), TARBALL_PATH);
-        coreExports.info(`Tarball written: ${TARBALL_PATH}`);
+        await tarTolerant(dir, TARBALL_PATH);
+        if (!node_fs.existsSync(TARBALL_PATH)) {
+            coreExports.warning('Tar did not produce an output file; skipping cache save.');
+            coreExports.endGroup();
+            return;
+        }
+        const size = node_fs.statSync(TARBALL_PATH).size;
+        coreExports.info(`Tarball size: ${formatBytes(size)} (${size} bytes)`);
         coreExports.endGroup();
         coreExports.startGroup(`Saving cache under key: ${key}`);
         try {
@@ -81586,8 +81635,6 @@ async function run() {
             coreExports.warning(`Cache save did not complete: ${err instanceof Error ? err.message : String(err)}`);
         }
         finally {
-            // Delete the tarball to free disk for any subsequent post-step
-            // (e.g., the generic ~/.cache cache save that runs after us).
             try {
                 if (node_fs.existsSync(TARBALL_PATH))
                     node_fs.unlinkSync(TARBALL_PATH);
@@ -81599,7 +81646,7 @@ async function run() {
         coreExports.endGroup();
     }
     catch (err) {
-        coreExports.warning(`docker-cache save failed: ${err instanceof Error ? err.message : String(err)}`);
+        coreExports.warning(`generic-cache save failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 }
 /* istanbul ignore next */

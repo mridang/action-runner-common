@@ -74,6 +74,11 @@ async function run(): Promise<void> {
     info(
       `Including ${include.length}/${newImages.length} images (${formatBytes(totalBytes)} / ${formatBytes(budget)} budget)`,
     );
+    // Always log exactly which images are being cached and how big each
+    // is (largest-first), so it's obvious what fills the docker cache.
+    for (const img of [...include].sort((a, b) => b.size - a.size)) {
+      info(`  ${formatBytes(img.size).padStart(10)}  ${img.name}`);
+    }
     if (skip.length) {
       warning(
         `Skipping ${skip.length} image(s) that did not fit the cache budget:\n` +
