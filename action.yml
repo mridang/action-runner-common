@@ -17,7 +17,7 @@ inputs:
     description: >
       Passed to step-security/harden-runner. One of "audit" or "block".
     required: false
-    default: 'audit'
+    default: audit
   harden-allowed-endpoints:
     description: >
       Newline-separated list of allowed endpoints, used when
