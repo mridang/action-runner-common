@@ -42,7 +42,7 @@
   "homepage": "https://github.com/mridang/action-runner-common",
   "bugs": "https://github.com/mridang/action-runner-common/issues",
   "dependencies": {
-    "@actions/cache": "^4.0.5",
+    "@actions/cache": "^6.0.1",
     "@actions/core": "^1.11.1",
     "@actions/exec": "^1.1.1"
   },
@@ -65,7 +65,7 @@
     "@types/node": "^22.18.12",
     "eslint": "^9.39.4",
     "jest": "^30.0.3",
-    "jest-junit": "^16.0.0",
+    "jest-junit": "^17.0.0",
     "knip": "^6.17.1",
     "prettier": "^3.1.1",
     "rollup": "^4.41.1",
