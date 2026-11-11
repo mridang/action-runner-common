@@ -110,7 +110,6 @@ function dockerRequest(opts: {
   });
 }
 
-
 /**
  * Issue a GET request to the Docker Engine API and parse the JSON body.
  * @template T - Shape of the parsed JSON payload.
@@ -192,7 +191,6 @@ export function binPack(
   return { include, skip, totalBytes };
 }
 
-
 /**
  * Export the named images to a single tarball via the Docker Engine API
  * (`GET /images/get?names=...`). Streams directly to disk.
@@ -220,7 +218,6 @@ export async function exportImages(
   }
   await pipeline(stream, createWriteStream(tarballPath));
 }
-
 
 /**
  * Load images from a tarball via the Docker Engine API

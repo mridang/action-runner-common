@@ -36,7 +36,7 @@ export async function run(): Promise<void> {
     if (error instanceof Error) {
       setFailed(error);
     } else {
-      setFailed(error as unknown as string);
+      setFailed(String(error));
     }
   }
 }
