@@ -110,7 +110,6 @@ function dockerRequest(opts: {
   });
 }
 
-/* eslint-disable jsdoc/check-tag-names -- @rejects is required by jsdoc/require-rejects but is missing from the check-tag-names tag list */
 
 /**
  * Issue a GET request to the Docker Engine API and parse the JSON body.
@@ -137,7 +136,6 @@ async function dockerGetJson<T>(requestPath: string): Promise<T> {
   }
   return JSON.parse(body) as T;
 }
-/* eslint-enable jsdoc/check-tag-names -- end of the @rejects range */
 
 /** Shape we read from `GET /images/json`. */
 interface DockerImage {
@@ -194,7 +192,6 @@ export function binPack(
   return { include, skip, totalBytes };
 }
 
-/* eslint-disable jsdoc/check-tag-names -- @rejects is required by jsdoc/require-rejects but is missing from the check-tag-names tag list */
 
 /**
  * Export the named images to a single tarball via the Docker Engine API
@@ -223,9 +220,7 @@ export async function exportImages(
   }
   await pipeline(stream, createWriteStream(tarballPath));
 }
-/* eslint-enable jsdoc/check-tag-names -- end of the @rejects range */
 
-/* eslint-disable jsdoc/check-tag-names -- @rejects is required by jsdoc/require-rejects but is missing from the check-tag-names tag list */
 
 /**
  * Load images from a tarball via the Docker Engine API
@@ -251,7 +246,6 @@ export async function loadImages(tarballPath: string): Promise<void> {
     throw new Error(`Docker /images/load returned ${statusCode}`);
   }
 }
-/* eslint-enable jsdoc/check-tag-names -- end of the @rejects range */
 
 /**
  * Free runner disk space by removing well-known pre-installed bloat.
