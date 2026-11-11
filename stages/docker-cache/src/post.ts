@@ -1,3 +1,7 @@
+/**
+ * @file Save step of the docker-cache stage. It exports the images pulled
+ * during the job, fits them into the disk budget and saves them as a cache.
+ */
 import {
   endGroup,
   getInput,
@@ -7,7 +11,7 @@ import {
   warning,
 } from '@actions/core';
 import { saveCache } from '@actions/cache';
-import { existsSync, unlinkSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import {
   STATE,
   TARBALL_PATH,
@@ -19,6 +23,15 @@ import {
 } from './lib.js';
 
 /* istanbul ignore next */
+
+/**
+ * Runs the save step: exports newly pulled images within the disk budget and
+ * saves them under the recorded cache key. Failures are reported as warnings
+ * so the job never fails on save.
+ * @returns A promise that resolves once the save step has finished.
+ * @example
+ * await run();
+ */
 async function run(): Promise<void> {
   try {
     const readOnly = getInput('read-only').trim().toLowerCase() === 'true';
@@ -90,9 +103,7 @@ async function run(): Promise<void> {
     }
 
     startGroup(`Exporting ${include.length} image(s) → ${TARBALL_PATH}`);
-    if (existsSync(TARBALL_PATH)) {
-      unlinkSync(TARBALL_PATH);
-    }
+    await rm(TARBALL_PATH, { force: true });
     await exportImages(
       include.map((i) => i.name),
       TARBALL_PATH,
@@ -112,7 +123,7 @@ async function run(): Promise<void> {
       // Delete the tarball to free disk for any subsequent post-step
       // (e.g., the generic ~/.cache cache save that runs after us).
       try {
-        if (existsSync(TARBALL_PATH)) unlinkSync(TARBALL_PATH);
+        await rm(TARBALL_PATH, { force: true });
       } catch {
         /* ignore */
       }
@@ -127,6 +138,7 @@ async function run(): Promise<void> {
 
 /* istanbul ignore next */
 // noinspection JSUnusedGlobalSymbols
+// eslint-disable-next-line unicorn/prefer-top-level-await -- CJS bundle output rejects top-level await
 export default (async () => {
   await run();
 })();

@@ -1,3 +1,6 @@
+/**
+ * @file Jest configuration for the action's unit and integration tests.
+ */
 export default {
   preset: 'ts-jest/presets/default-esm',
   transform: {

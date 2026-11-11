@@ -1,18 +1,27 @@
+/**
+ * @file Rollup configuration that bundles the action entrypoints into CommonJS
+ * files under dist/ and stages/docker-cache/dist/.
+ */
 import json from '@rollup/plugin-json';
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
-import { dirname, resolve as r, dirname as dn } from 'node:path';
+import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import * as nodules from 'node:module';
+import { builtinModules } from 'node:module';
 import typescript from '@rollup/plugin-typescript';
 
-const NODE_BUILTINS = nodules.builtinModules.reduce(
+const NODE_BUILTINS = builtinModules.reduce(
   (acc, name) => [...acc, name, `node:${name}`],
   [],
 );
 
-const inlinePackageJsonPlugin = {
-  name: 'inline-json',
+/**
+ * Rollup plugin that inlines the JSON files that bundled packages load with
+ * `require()`, so the output has no runtime file lookups.
+ */
+class InlinePackageJsonPlugin {
+  name = 'inline-json';
+
   transform(code, id) {
     if (!id.includes('node_modules')) {
       return null;
@@ -23,10 +32,11 @@ const inlinePackageJsonPlugin = {
 
     const newCode = code.replaceAll(
       requirePattern,
-      (match, quote, requiredPath) => {
+      (match, _quote, requiredPath) => {
         try {
-          const filePath = r(dirname(id), requiredPath);
-          return readFileSync(filePath, 'utf-8');
+          const filePath = path.resolve(path.dirname(id), requiredPath);
+          // eslint-disable-next-line n/no-sync -- sync is fine in a script/bootstrap
+          return readFileSync(filePath, 'utf8');
         } catch (error) {
           this.warn(
             `Failed to inline '${requiredPath}' for ${id}: ${error.message}`,
@@ -40,8 +50,8 @@ const inlinePackageJsonPlugin = {
       code: newCode,
       map: null,
     };
-  },
-};
+  }
+}
 
 const makeConfig = (input, output, configOverrides = {}) => ({
   input,
@@ -78,7 +88,7 @@ const makeConfig = (input, output, configOverrides = {}) => ({
       preferConst: true,
       compact: true,
     }),
-    inlinePackageJsonPlugin,
+    new InlinePackageJsonPlugin(),
     resolve({
       exportConditions: ['node', 'default'],
       preferBuiltins: true,
@@ -94,7 +104,7 @@ const makeConfig = (input, output, configOverrides = {}) => ({
       tsconfig: './tsconfig.json',
       module: 'NodeNext',
       moduleResolution: 'NodeNext',
-      outDir: dn(output),
+      outDir: path.dirname(output),
       ...configOverrides.typescript,
     }),
   ],
@@ -102,7 +112,15 @@ const makeConfig = (input, output, configOverrides = {}) => ({
 });
 
 // noinspection JSUnusedGlobalSymbols,SpellCheckingInspection
-export default (configOverrides = {}) => [
+
+/**
+ * Lists the Rollup options for every CommonJS bundle the action ships.
+ * @param {object} configOverrides - Extra options merged into the TypeScript plugin.
+ * @returns {object[]} One Rollup configuration per entrypoint.
+ * @example
+ * export default buildConfigs({ typescript: { sourceMap: false } });
+ */
+const buildConfigs = (configOverrides = {}) => [
   makeConfig('src/main.ts', 'dist/main.cjs', configOverrides),
   makeConfig(
     'stages/docker-cache/src/main.ts',
@@ -115,3 +133,5 @@ export default (configOverrides = {}) => [
     configOverrides,
   ),
 ];
+
+export default buildConfigs;

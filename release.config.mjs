@@ -1,3 +1,7 @@
+/**
+ * @file Configuration for semantic-release, covering versioning, the changelog
+ * and the committed dist bundles.
+ */
 // noinspection JSUnusedGlobalSymbols
 export default {
   plugins: [
