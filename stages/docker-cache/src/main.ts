@@ -1,3 +1,7 @@
+/**
+ * @file Restore step of the docker-cache stage. It records the images present
+ * before the job, restores the cache tarball and loads its images into Docker.
+ */
 import {
   endGroup,
   getInput,
@@ -8,16 +12,25 @@ import {
   warning,
 } from '@actions/core';
 import { restoreCache } from '@actions/cache';
-import { existsSync } from 'node:fs';
 import {
   STATE,
   TARBALL_PATH,
+  fileExists,
   freeDisk,
   listImages,
   loadImages,
 } from './lib.js';
 
 /* istanbul ignore next */
+
+/**
+ * Runs the restore step: optionally frees disk, records pre-existing images
+ * and restores the cache tarball. Failures are reported as warnings so the job
+ * continues.
+ * @returns A promise that resolves once the restore step has finished.
+ * @example
+ * await run();
+ */
 async function run(): Promise<void> {
   try {
     const key = getInput('key', { required: true }).trim();
@@ -48,7 +61,7 @@ async function run(): Promise<void> {
       info(`Cache hit on key: ${hitKey}`);
       saveState(STATE.HIT, 'true');
       setOutput('cache-hit', 'true');
-      if (existsSync(TARBALL_PATH)) {
+      if (await fileExists(TARBALL_PATH)) {
         await loadImages(TARBALL_PATH);
         info('Docker images loaded from cache.');
       } else {
@@ -62,15 +75,16 @@ async function run(): Promise<void> {
       setOutput('cache-hit', 'false');
     }
     endGroup();
-  } catch (err) {
+  } catch (error) {
     warning(
-      `docker-cache restore failed: ${err instanceof Error ? err.message : String(err)}`,
+      `docker-cache restore failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
 
 /* istanbul ignore next */
 // noinspection JSUnusedGlobalSymbols
+// eslint-disable-next-line unicorn/prefer-top-level-await -- CJS bundle output rejects top-level await
 export default (async () => {
   await run();
 })();

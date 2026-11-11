@@ -1,19 +1,28 @@
+/**
+ * @file Rollup configuration that bundles the action entrypoints into CommonJS
+ * files under dist/ and stages/docker-cache/dist/.
+ */
 import json from '@rollup/plugin-json';
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
-import { dirname, resolve as r, dirname as dn } from 'node:path';
-import { readFileSync } from 'node:fs';
-import * as nodules from 'node:module';
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { builtinModules } from 'node:module';
 import typescript from '@rollup/plugin-typescript';
 
-const NODE_BUILTINS = nodules.builtinModules.reduce(
-  (acc, name) => acc.concat([name, `node:${name}`]),
+const NODE_BUILTINS = builtinModules.reduce(
+  (acc, name) => [...acc, name, `node:${name}`],
   [],
 );
 
-const inlinePackageJsonPlugin = {
-  name: 'inline-json',
-  transform(code, id) {
+/**
+ * Rollup plugin that inlines the JSON files that bundled packages load with
+ * `require()`, so the output has no runtime file lookups.
+ */
+class InlinePackageJsonPlugin {
+  name = 'inline-json';
+
+  async transform(code, id) {
     if (!id.includes('node_modules')) {
       return null;
     }
@@ -21,27 +30,30 @@ const inlinePackageJsonPlugin = {
     const requirePattern =
       /require\((['"`])([-./\w]+?(?:package\.json|commitlint\.schema\.json))\1\)/g;
 
-    const newCode = code.replace(
-      requirePattern,
-      (match, quote, requiredPath) => {
-        try {
-          const filePath = r(dirname(id), requiredPath);
-          return readFileSync(filePath, 'utf-8');
-        } catch (e) {
-          this.warn(
-            `Failed to inline '${requiredPath}' for ${id}: ${e.message}`,
-          );
-          return match;
-        }
-      },
-    );
+    let newCode = '';
+    let lastIndex = 0;
+    for (const found of code.matchAll(requirePattern)) {
+      const [match, , requiredPath] = found;
+      let replacement = match;
+      try {
+        const filePath = path.resolve(path.dirname(id), requiredPath);
+        replacement = await readFile(filePath, 'utf8');
+      } catch (error) {
+        this.warn(
+          `Failed to inline '${requiredPath}' for ${id}: ${error.message}`,
+        );
+      }
+      newCode += code.slice(lastIndex, found.index) + replacement;
+      lastIndex = found.index + match.length;
+    }
+    newCode += code.slice(lastIndex);
 
     return {
       code: newCode,
       map: null,
     };
-  },
-};
+  }
+}
 
 const makeConfig = (input, output, configOverrides = {}) => ({
   input,
@@ -65,10 +77,12 @@ const makeConfig = (input, output, configOverrides = {}) => ({
   onwarn(warning, warn) {
     switch (warning.code) {
       case 'CIRCULAR_DEPENDENCY':
-      case 'THIS_IS_UNDEFINED':
+      case 'THIS_IS_UNDEFINED': {
         return;
-      default:
+      }
+      default: {
         warn(warning);
+      }
     }
   },
   plugins: [
@@ -76,7 +90,7 @@ const makeConfig = (input, output, configOverrides = {}) => ({
       preferConst: true,
       compact: true,
     }),
-    inlinePackageJsonPlugin,
+    new InlinePackageJsonPlugin(),
     resolve({
       exportConditions: ['node', 'default'],
       preferBuiltins: true,
@@ -92,7 +106,7 @@ const makeConfig = (input, output, configOverrides = {}) => ({
       tsconfig: './tsconfig.json',
       module: 'NodeNext',
       moduleResolution: 'NodeNext',
-      outDir: dn(output),
+      outDir: path.dirname(output),
       ...configOverrides.typescript,
     }),
   ],
@@ -100,7 +114,15 @@ const makeConfig = (input, output, configOverrides = {}) => ({
 });
 
 // noinspection JSUnusedGlobalSymbols,SpellCheckingInspection
-export default (configOverrides = {}) => [
+
+/**
+ * Lists the Rollup options for every CommonJS bundle the action ships.
+ * @param {object} configOverrides - Extra options merged into the TypeScript plugin.
+ * @returns {object[]} One Rollup configuration per entrypoint.
+ * @example
+ * export default buildConfigs({ typescript: { sourceMap: false } });
+ */
+const buildConfigs = (configOverrides = {}) => [
   makeConfig('src/main.ts', 'dist/main.cjs', configOverrides),
   makeConfig(
     'stages/docker-cache/src/main.ts',
@@ -113,3 +135,5 @@ export default (configOverrides = {}) => [
     configOverrides,
   ),
 ];
+
+export default buildConfigs;
