@@ -42,7 +42,7 @@ async function run(): Promise<void> {
     }
 
     const fractionInput = getInput('max-fraction').trim();
-    let fraction = fractionInput ? parseFloat(fractionInput) : 0.6;
+    let fraction = fractionInput ? Number.parseFloat(fractionInput) : 0.6;
     if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1) {
       warning(`Invalid max-fraction "${fractionInput}"; falling back to 0.6.`);
       fraction = 0.6;
@@ -74,7 +74,7 @@ async function run(): Promise<void> {
     info(
       `Including ${include.length}/${newImages.length} images (${formatBytes(totalBytes)} / ${formatBytes(budget)} budget)`,
     );
-    if (skip.length) {
+    if (skip.length > 0) {
       warning(
         `Skipping ${skip.length} image(s) that did not fit the cache budget:\n` +
           skip.map((s) => `  - ${s.name} (${formatBytes(s.size)})`).join('\n'),
@@ -104,9 +104,9 @@ async function run(): Promise<void> {
     try {
       const cacheId = await saveCache([TARBALL_PATH], key);
       info(`Cache saved (id=${cacheId}).`);
-    } catch (err) {
+    } catch (error) {
       warning(
-        `Cache save did not complete: ${err instanceof Error ? err.message : String(err)}`,
+        `Cache save did not complete: ${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
       // Delete the tarball to free disk for any subsequent post-step
@@ -118,9 +118,9 @@ async function run(): Promise<void> {
       }
     }
     endGroup();
-  } catch (err) {
+  } catch (error) {
     warning(
-      `docker-cache save failed: ${err instanceof Error ? err.message : String(err)}`,
+      `docker-cache save failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

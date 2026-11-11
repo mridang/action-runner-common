@@ -195,9 +195,9 @@ export async function freeDisk(): Promise<void> {
     } catch {
       try {
         await exec('sudo', ['rm', '-rf', p], { silent: true });
-      } catch (err) {
+      } catch (error) {
         warning(
-          `free-disk: could not remove ${p}: ${err instanceof Error ? err.message : String(err)}`,
+          `free-disk: could not remove ${p}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }

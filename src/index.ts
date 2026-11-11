@@ -2,11 +2,7 @@ import { info, setFailed as actionFailed } from '@actions/core';
 
 function setFailed(message: string | Error): void {
   if (process.env.JEST_WORKER_ID) {
-    if (message instanceof Error) {
-      throw message;
-    } else {
-      throw new Error(message);
-    }
+    throw message instanceof Error ? message : new Error(message);
   } else {
     actionFailed(message);
   }
@@ -17,11 +13,11 @@ export async function run(): Promise<void> {
     info(
       'action-runner-common: no owned stages yet — composite handles everything.',
     );
-  } catch (err) {
-    if (err instanceof Error) {
-      setFailed(err);
+  } catch (error) {
+    if (error instanceof Error) {
+      setFailed(error);
     } else {
-      setFailed(err as unknown as string);
+      setFailed(error as unknown as string);
     }
   }
 }

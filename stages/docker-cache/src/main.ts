@@ -62,9 +62,9 @@ async function run(): Promise<void> {
       setOutput('cache-hit', 'false');
     }
     endGroup();
-  } catch (err) {
+  } catch (error) {
     warning(
-      `docker-cache restore failed: ${err instanceof Error ? err.message : String(err)}`,
+      `docker-cache restore failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
