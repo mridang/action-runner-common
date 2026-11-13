@@ -28728,39 +28728,54 @@ function info(message) {
     process.stdout.write(message + os__namespace.EOL);
 }
 
+/**
+ * @file Core logic of the action. It reports failures through the Actions
+ * toolkit, or throws when running under Jest.
+ */
+/**
+ * Marks the action as failed, or throws the message when running under Jest so
+ * tests can observe the failure.
+ * @param message - Failure message or error to report.
+ * @throws When running under Jest, with the message wrapped in an Error.
+ * @example
+ * setFailed('Could not restore the cache.');
+ */
 function setFailed(message) {
     if (process.env.JEST_WORKER_ID) {
-        if (message instanceof Error) {
-            throw message;
-        }
-        else {
-            throw new Error(message);
-        }
+        throw message instanceof Error ? message : new Error(message);
     }
     else {
         setFailed$1(message);
     }
 }
+/**
+ * Runs the action's main logic. Any error is forwarded to setFailed so the
+ * workflow step is marked as failed.
+ * @returns A promise that resolves once the logic has completed.
+ * @example
+ * await run();
+ */
 async function run() {
     try {
         info('action-runner-common: no owned stages yet — composite handles everything.');
     }
-    catch (err) {
-        if (err instanceof Error) {
-            setFailed(err);
+    catch (error) {
+        if (error instanceof Error) {
+            setFailed(error);
         }
         else {
-            setFailed(err);
+            setFailed(String(error));
         }
     }
 }
 
 /**
- * The entrypoint for the action. This file simply imports and runs the action's
- * main logic.
+ * @file The entrypoint for the action. This file simply imports and runs the
+ * action's main logic.
  */
 /* istanbul ignore next */
 // noinspection JSUnusedGlobalSymbols
+// eslint-disable-next-line unicorn/prefer-top-level-await -- CJS bundle output rejects top-level await
 var main = (async () => {
     await run();
 })();
