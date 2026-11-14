@@ -34,8 +34,10 @@ inputs:
     description: >
       Enable a generic always-on cache over ~/.cache (XDG cache home).
       Tools that respect XDG_CACHE_HOME (pip, Go build cache, gh CLI,
-      Helm, oras, others) get cross-run persistence for free. Set to
-      "false" to skip.
+      Helm, oras, others) get cross-run persistence for free. The Go build
+      cache (~/.cache/go-build) and the golangci-lint cache
+      (~/.cache/golangci-lint) are excluded because actions/setup-go and
+      golangci-lint-action already cache them. Set to "false" to skip.
     required: false
     default: 'true'
 
@@ -96,7 +98,10 @@ runs:
       if: ${{ inputs.generic-cache == 'true' }}
       uses: actions/cache@v4
       with:
-        path: ~/.cache
+        path: |
+          ~/.cache
+          !~/.cache/go-build
+          !~/.cache/golangci-lint
         key: runner-common-cache-${{ runner.os }}-${{ github.run_id }}
         restore-keys: |
           runner-common-cache-${{ runner.os }}-
