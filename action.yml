@@ -32,12 +32,14 @@ inputs:
 
   generic-cache:
     description: >
-      Enable a generic always-on cache over ~/.cache (XDG cache home).
-      Tools that respect XDG_CACHE_HOME (pip, Go build cache, gh CLI,
+      Enable a generic always-on cache over ~/.cache.
+      Tools that write to the default cache directory (pip, Cypress, gh CLI,
       Helm, oras, others) get cross-run persistence for free. The Go build
       cache (~/.cache/go-build) and the golangci-lint cache
       (~/.cache/golangci-lint) are excluded because actions/setup-go and
-      golangci-lint-action already cache them. Set to "false" to skip.
+      golangci-lint-action already cache them. The cache uses one fixed key
+      per runner OS, so it is saved once and never re-uploaded; delete the
+      cache to refresh it. Set to "false" to skip.
     required: false
     default: 'true'
 
@@ -102,9 +104,7 @@ runs:
           ~/.cache
           !~/.cache/go-build
           !~/.cache/golangci-lint
-        key: runner-common-cache-${{ runner.os }}-${{ github.run_id }}
-        restore-keys: |
-          runner-common-cache-${{ runner.os }}-
+        key: runner-common-cache-${{ runner.os }}
 
     - name: Resolve Docker cache key
       if: ${{ inputs.docker-cache == 'true' }}
