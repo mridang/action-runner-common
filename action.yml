@@ -39,7 +39,9 @@ inputs:
       (~/.cache/golangci-lint) are excluded because actions/setup-go and
       golangci-lint-action already cache them. The cache uses one fixed key
       per runner OS, so it is saved once and never re-uploaded; delete the
-      cache to refresh it. Set to "false" to skip.
+      cache to refresh it. On Linux and macOS runners XDG_CACHE_HOME is set
+      to ~/.cache so that tools honouring it write inside the cached path.
+      Set to "false" to skip.
     required: false
     default: 'true'
 
@@ -95,6 +97,11 @@ runs:
       if: ${{ inputs.generic-cache == 'true' }}
       shell: bash
       run: mkdir -p "$HOME/.cache"
+
+    - name: Point XDG_CACHE_HOME at ~/.cache
+      if: ${{ inputs.generic-cache == 'true' && runner.os != 'Windows' }}
+      shell: bash
+      run: echo "XDG_CACHE_HOME=$HOME/.cache" >> "$GITHUB_ENV"
 
     - name: Generic cache (~/.cache)
       if: ${{ inputs.generic-cache == 'true' }}

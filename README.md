@@ -5,7 +5,7 @@ A composite GitHub Action that bundles the common first-step setup applied at th
 ## Features
 
 - **Runner Hardening**: Invokes [`step-security/harden-runner`](https://github.com/step-security/harden-runner) with a configurable egress policy (default `audit`) to observe or enforce outbound traffic from the runner.
-- **Generic Cache**: Caches `~/.cache` across runs via `actions/cache`, under one fixed key per runner OS. Tools that write to the default Linux cache directory (pip, Cypress, `node-gyp`, `gh` CLI, Helm, oras, and others) get cross-run persistence with zero per-tool configuration.
+- **Generic Cache**: Caches `~/.cache` across runs via `actions/cache`, under one fixed key per runner OS, and sets `XDG_CACHE_HOME=$HOME/.cache` for the rest of the job on Linux and macOS so tools that honour it write inside the cached path. Tools that write to the default Linux cache directory (pip, Cypress, `node-gyp`, `gh` CLI, Helm, oras, and others) get cross-run persistence with zero per-tool configuration.
 - **Docker Image Cache**: Invokes [`ScribeMD/docker-cache`](https://github.com/ScribeMD/docker-cache) to persist pulled and built Docker images across workflow runs, dramatically reducing pull time on subsequent jobs.
 - **Pinned by SHA**: Every upstream action is pinned to a full commit SHA, not a floating tag, so consumer workflows never have to audit the dependency graph themselves.
 - **Forward-Compatible Surface**: Future common setup steps land here behind toggle inputs, so consumer workflows pick them up by bumping the tag rather than editing each repo individually.
@@ -73,7 +73,7 @@ Both upstream actions are pinned by full commit SHA. Updating an upstream means 
 ## Known Issues
 
 - The generic cache is saved once and then never updated, because its key is fixed. After a tool version changes (for example a new Cypress release) the cached copy is simply missing the new version, which is downloaded on every run until the cache is refreshed. Refresh it by deleting the entry, for example `gh cache delete runner-common-cache-Linux`, and the next run on the default branch saves a new one.
-- The action does not set `XDG_CACHE_HOME`. It caches the literal `~/.cache` path, which is where tools write by default on Linux runners. On macOS and Windows runners many tools use other locations (for example `~/Library/Caches`), so the generic cache will hold little there.
+- The action sets only `XDG_CACHE_HOME` (to `$HOME/.cache`, on Linux and macOS runners), because that is the only XDG directory it caches. `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` are left alone. Tools that ignore the variable and use their own platform location (Go and pip on macOS use `~/Library/Caches`, and everything on Windows) are not covered, so the generic cache will hold little for them.
 - `ScribeMD/docker-cache` does not support `restore-keys` (partial cache restoration) by design — see its README for the reasoning. The cache key must match exactly for a hit.
 - `harden-egress-policy: 'block'` requires every outbound host to be listed in `harden-allowed-endpoints`, including hosts used by tools your job invokes (npm registry, package CDNs, etc.). Start with `'audit'`, review the runtime report, then graduate to `'block'`.
 - This action is intended to be the **first** step of every job. Placing it after `actions/checkout` or other steps is supported but defeats the purpose of hardening the runner before user code runs.
