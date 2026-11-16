@@ -19,7 +19,7 @@ import {
   freeDisk,
   listImages,
   loadImages,
-} from './lib.js';
+} from './library.js';
 
 /* istanbul ignore next */
 
@@ -50,7 +50,7 @@ async function run(): Promise<void> {
     const preExisting = await listImages();
     saveState(
       STATE.PRE_EXISTING,
-      JSON.stringify(preExisting.map((i) => i.name)),
+      JSON.stringify(preExisting.map((index) => index.name)),
     );
     info(`Pre-existing images: ${preExisting.length}`);
     endGroup();

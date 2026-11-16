@@ -20,7 +20,7 @@ import {
   formatBytes,
   freeDiskBytes,
   listImages,
-} from './lib.js';
+} from './library.js';
 
 /* istanbul ignore next */
 
@@ -61,18 +61,18 @@ async function run(): Promise<void> {
       fraction = 0.6;
     }
 
-    const preExistingArr: string[] = JSON.parse(
+    const preExistingArray: string[] = JSON.parse(
       getState(STATE.PRE_EXISTING) || '[]',
     );
-    const preExisting = new Set(preExistingArr);
+    const preExisting = new Set(preExistingArray);
 
     startGroup('Listing current Docker images');
     const current = await listImages();
-    const newImages = current.filter((img) => !preExisting.has(img.name));
-    info(`Current: ${current.length}, new (delta): ${newImages.length}`);
+    const addedImages = current.filter((img) => !preExisting.has(img.name));
+    info(`Current: ${current.length}, new (delta): ${addedImages.length}`);
     endGroup();
 
-    if (newImages.length === 0) {
+    if (addedImages.length === 0) {
       info('No new images pulled during this job; nothing to cache.');
       return;
     }
@@ -83,9 +83,9 @@ async function run(): Promise<void> {
     info(
       `Free disk: ${formatBytes(free)}, fraction: ${fraction}, budget: ${formatBytes(budget)}`,
     );
-    const { include, skip, totalBytes } = binPack(newImages, budget);
+    const { include, skip, totalBytes } = binPack(addedImages, budget);
     info(
-      `Including ${include.length}/${newImages.length} images (${formatBytes(totalBytes)} / ${formatBytes(budget)} budget)`,
+      `Including ${include.length}/${addedImages.length} images (${formatBytes(totalBytes)} / ${formatBytes(budget)} budget)`,
     );
     if (skip.length > 0) {
       warning(
@@ -105,7 +105,7 @@ async function run(): Promise<void> {
     startGroup(`Exporting ${include.length} image(s) → ${TARBALL_PATH}`);
     await rm(TARBALL_PATH, { force: true });
     await exportImages(
-      include.map((i) => i.name),
+      include.map((index) => index.name),
       TARBALL_PATH,
     );
     info(`Tarball written: ${TARBALL_PATH}`);
