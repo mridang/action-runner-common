@@ -61,9 +61,9 @@ async function run(): Promise<void> {
       fraction = 0.6;
     }
 
-    const preExistingArray: string[] = JSON.parse(
+    const preExistingArray = JSON.parse(
       getState(STATE.PRE_EXISTING) || '[]',
-    );
+    ) as string[];
     const preExisting = new Set(preExistingArray);
 
     startGroup('Listing current Docker images');

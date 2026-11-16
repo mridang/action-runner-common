@@ -8,7 +8,7 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { access, rm, statfs } from 'node:fs/promises';
 import { request } from 'node:http';
 import path from 'node:path';
-import { Readable } from 'node:stream';
+import type { Readable } from 'node:stream';
 import { finished, pipeline } from 'node:stream/promises';
 
 /** Tarball location for the cache payload. Under RUNNER_TEMP. */
@@ -45,7 +45,7 @@ interface ImageEntry {
  */
 export async function freeDiskBytes(filePath: string): Promise<number> {
   const stat = await statfs(path.dirname(filePath));
-  return Number(stat.bavail) * Number(stat.bsize);
+  return stat.bavail * stat.bsize;
 }
 
 /**
@@ -83,7 +83,7 @@ export async function fileExists(filePath: string): Promise<boolean> {
  *   path: '/version',
  * });
  */
-function dockerRequest(opts: {
+async function dockerRequest(opts: {
   method: 'GET' | 'POST';
   path: string;
   body?: Readable;
@@ -158,7 +158,7 @@ export async function listImages(): Promise<ImageEntry[]> {
   for (const img of raw) {
     const tags = (img.RepoTags || []).filter((t) => t && t !== '<none>:<none>');
     if (tags.length === 0) continue;
-    result.push({ name: tags[0]!, size: Number(img.Size || 0) });
+    result.push({ name: tags[0], size: img.Size || 0 });
   }
   return result;
 }
