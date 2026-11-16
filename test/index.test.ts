@@ -5,6 +5,9 @@ import { expect, jest } from '@jest/globals';
 // noinspection ES6PreferShortImport
 import { run } from '../src/index.js';
 
+/** Matches the message the placeholder run logs. */
+const PLACEHOLDER_PATTERN = /no owned stages yet/;
+
 test('run() resolves without throwing', async () => {
   await expect(run()).resolves.toBeUndefined();
 });
@@ -24,5 +27,5 @@ test('run() logs the placeholder notice', async () => {
   } finally {
     spy.mockRestore();
   }
-  expect(writes.join('')).toMatch(/no owned stages yet/);
+  expect(writes.join('')).toMatch(PLACEHOLDER_PATTERN);
 });
