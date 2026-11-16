@@ -1,7 +1,7 @@
 /**
  * @file Tests for the core run() logic in src/index.ts.
  */
-import { expect, jest } from '@jest/globals';
+import { expect, jest, test } from '@jest/globals';
 // noinspection ES6PreferShortImport
 import { run } from '../src/index.js';
 
