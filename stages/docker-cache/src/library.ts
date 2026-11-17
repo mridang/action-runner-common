@@ -105,7 +105,7 @@ async function dockerRequest(opts: {
         headers: opts.headers,
       },
       (res) => {
-        resolve({ statusCode: res.statusCode || 0, stream: res });
+        resolve({ statusCode: res.statusCode ?? 0, stream: res });
       },
     );
     req.on('error', reject);
@@ -121,25 +121,34 @@ async function dockerRequest(opts: {
  * Issue a GET request to the Docker Engine API and parse the JSON body.
  * @template T - Shape of the parsed JSON payload.
  * @param requestPath - Engine API path to fetch, such as `/images/json`.
- * @returns The parsed JSON payload typed as the caller's expected shape.
- * @throws When the daemon answers with a status outside the 2xx range.
+ * @param isValid - Type guard confirming the parsed payload has the expected shape.
+ * @returns The parsed JSON payload, narrowed to the caller's expected shape.
+ * @throws When the daemon answers with a status outside the 2xx range or the payload fails the guard.
  * @rejects When the request fails or the body is not valid JSON.
  * @example
- * const images = await dockerGetJson<DockerImage[]>('/images/json');
+ * const images = await dockerGetJson('/images/json', isDockerImageList);
  */
-async function dockerGetJson<T>(requestPath: string): Promise<T> {
+async function dockerGetJson<T>(
+  requestPath: string,
+  isValid: (value: unknown) => value is T,
+): Promise<T> {
   const { statusCode, stream } = await dockerRequest({
     method: 'GET',
     path: requestPath,
   });
-  const chunks = (await stream.toArray()) as Buffer[];
-  const body = Buffer.concat(chunks).toString('utf8');
+  stream.setEncoding('utf8');
+  const chunks = await stream.toArray();
+  const body = chunks.join('');
   if (statusCode < 200 || statusCode >= 300) {
     throw new Error(
       `Docker API ${requestPath} returned ${statusCode}: ${body.slice(0, 200)}`,
     );
   }
-  return JSON.parse(body) as T;
+  const parsed: unknown = JSON.parse(body);
+  if (!isValid(parsed)) {
+    throw new Error(`Docker API ${requestPath} returned an unexpected payload`);
+  }
+  return parsed;
 }
 
 /** Shape we read from `GET /images/json`. */
@@ -147,6 +156,42 @@ interface DockerImage {
   Id: string;
   RepoTags: string[] | null;
   Size: number;
+}
+
+/**
+ * Check that a parsed entry is one image of the `GET /images/json` list.
+ * @param img - Parsed JSON entry to inspect.
+ * @returns True when the entry carries an id, a tag list or null, and a size.
+ * @example
+ * isDockerImage({ Id: 'a', RepoTags: null, Size: 1 }); // true
+ */
+function isDockerImage(img: unknown): img is DockerImage {
+  if (typeof img !== 'object' || img === null) {
+    return false;
+  }
+  if (
+    !('RepoTags' in img) ||
+    !(img.RepoTags === null || Array.isArray(img.RepoTags))
+  ) {
+    return false;
+  }
+  return (
+    'Id' in img &&
+    typeof img.Id === 'string' &&
+    'Size' in img &&
+    typeof img.Size === 'number'
+  );
+}
+
+/**
+ * Check that a parsed payload is the image list returned by `GET /images/json`.
+ * @param value - Parsed JSON to inspect.
+ * @returns True when the payload is an array of well-formed images.
+ * @example
+ * isDockerImageList([{ Id: 'a', RepoTags: null, Size: 1 }]); // true
+ */
+function isDockerImageList(value: unknown): value is DockerImage[] {
+  return Array.isArray(value) && value.every(isDockerImage);
 }
 
 /**
@@ -159,9 +204,9 @@ interface DockerImage {
  * info(`Found ${images.length} named images.`);
  */
 export async function listImages(): Promise<ImageEntry[]> {
-  const raw = await dockerGetJson<DockerImage[]>('/images/json');
+  const raw = await dockerGetJson('/images/json', isDockerImageList);
   return raw.flatMap((img): ImageEntry[] => {
-    const tags = (img.RepoTags || []).filter((t) => t && t !== '<none>:<none>');
+    const tags = (img.RepoTags ?? []).filter((t) => t && t !== '<none>:<none>');
     return tags.length === 0 ? [] : [{ name: tags[0], size: img.Size || 0 }];
   });
 }
@@ -196,8 +241,7 @@ export function binPack(
               skip: packed.skip,
               totalBytes: packed.totalBytes + img.size,
             }
-          : // eslint-disable-next-line e18e/no-spread-in-reduce -- one runner holds a few dozen images, and each placement depends on the total packed so far
-            { ...packed, skip: [...packed.skip, img] },
+          : { ...packed, skip: [...packed.skip, img] },
       { include: [], skip: [], totalBytes: 0 },
     );
 }

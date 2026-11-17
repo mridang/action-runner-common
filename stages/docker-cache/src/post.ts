@@ -67,10 +67,16 @@ async function run(): Promise<void> {
     }
     const fraction = isValidFraction ? parsedFraction : 0.6;
 
-    const preExistingArray = JSON.parse(
+    const preExistingParsed: unknown = JSON.parse(
       getState(STATE.PRE_EXISTING) || '[]',
-    ) as string[];
-    const preExisting = new Set(preExistingArray);
+    );
+    const preExisting = new Set(
+      Array.isArray(preExistingParsed)
+        ? preExistingParsed.filter(
+            (name: unknown): name is string => typeof name === 'string',
+          )
+        : [],
+    );
 
     startGroup('Listing current Docker images');
     const current = await listImages();
