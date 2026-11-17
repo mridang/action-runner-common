@@ -2,6 +2,7 @@
  * @file Save step of the docker-cache stage. It exports the images pulled
  * during the job, fits them into the disk budget and saves them as a cache.
  */
+import { rm } from 'node:fs/promises';
 import {
   endGroup,
   getInput,
@@ -11,7 +12,6 @@ import {
   warning,
 } from '@actions/core';
 import { saveCache } from '@actions/cache';
-import { rm } from 'node:fs/promises';
 import {
   STATE,
   TARBALL_PATH,
@@ -55,11 +55,17 @@ async function run(): Promise<void> {
     }
 
     const fractionInput = getInput('max-fraction').trim();
-    let fraction = fractionInput ? Number.parseFloat(fractionInput) : 0.6;
-    if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1) {
+    const parsedFraction = fractionInput
+      ? Number.parseFloat(fractionInput)
+      : 0.6;
+    const isValidFraction =
+      Number.isFinite(parsedFraction) &&
+      parsedFraction > 0 &&
+      parsedFraction <= 1;
+    if (!isValidFraction) {
       warning(`Invalid max-fraction "${fractionInput}"; falling back to 0.6.`);
-      fraction = 0.6;
     }
+    const fraction = isValidFraction ? parsedFraction : 0.6;
 
     const preExistingArray = JSON.parse(
       getState(STATE.PRE_EXISTING) || '[]',
@@ -89,8 +95,9 @@ async function run(): Promise<void> {
     );
     if (skip.length > 0) {
       warning(
-        `Skipping ${skip.length} image(s) that did not fit the cache budget:\n` +
-          skip.map((s) => `  - ${s.name} (${formatBytes(s.size)})`).join('\n'),
+        `Skipping ${skip.length} image(s) that did not fit the cache budget:\n${skip
+          .map((s) => `  - ${s.name} (${formatBytes(s.size)})`)
+          .join('\n')}`,
       );
     }
     endGroup();
