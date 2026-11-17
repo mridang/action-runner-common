@@ -2,14 +2,14 @@
  * @file Helpers for the docker-cache stage. They talk to the Docker Engine API
  * over a unix socket, pack images into a budget and manage the cache tarball.
  */
-import { info, warning } from '@actions/core';
-import { exec } from '@actions/exec';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { access, rm, statfs } from 'node:fs/promises';
 import { request } from 'node:http';
 import path from 'node:path';
-import type { Readable } from 'node:stream';
 import { finished, pipeline } from 'node:stream/promises';
+import { exec } from '@actions/exec';
+import { info, warning } from '@actions/core';
+import type { Readable } from 'node:stream';
 
 /** Tarball location for the cache payload. Under RUNNER_TEMP. */
 export const TARBALL_PATH = path.join(
@@ -27,7 +27,14 @@ export const STATE = {
 
 /** Path to the docker daemon unix socket. Overridable for tests. */
 const DOCKER_SOCKET =
-  process.env.DOCKER_HOST?.replace(/^unix:\/\//, '') || '/var/run/docker.sock';
+  process.env.DOCKER_HOST?.replace(/^unix:\/\//u, '') || '/var/run/docker.sock';
+
+/** Formats a scaled byte count with exactly two decimals and no digit grouping. */
+const TWO_DECIMALS = new Intl.NumberFormat('en', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  useGrouping: false,
+});
 
 /** A docker image as we care about it: identifier + total size in bytes. */
 interface ImageEntry {
@@ -125,8 +132,7 @@ async function dockerGetJson<T>(requestPath: string): Promise<T> {
     method: 'GET',
     path: requestPath,
   });
-  const chunks: Buffer[] = [];
-  for await (const c of stream) chunks.push(c as Buffer);
+  const chunks = (await stream.toArray()) as Buffer[];
   const body = Buffer.concat(chunks).toString('utf8');
   if (statusCode < 200 || statusCode >= 300) {
     throw new Error(
@@ -154,13 +160,17 @@ interface DockerImage {
  */
 export async function listImages(): Promise<ImageEntry[]> {
   const raw = await dockerGetJson<DockerImage[]>('/images/json');
-  const result: ImageEntry[] = [];
-  for (const img of raw) {
+  return raw.flatMap((img): ImageEntry[] => {
     const tags = (img.RepoTags || []).filter((t) => t && t !== '<none>:<none>');
-    if (tags.length === 0) continue;
-    result.push({ name: tags[0], size: img.Size || 0 });
-  }
-  return result;
+    return tags.length === 0 ? [] : [{ name: tags[0], size: img.Size || 0 }];
+  });
+}
+
+/** The outcome of packing images into a size budget. */
+interface BinPackResult {
+  include: ImageEntry[];
+  skip: ImageEntry[];
+  totalBytes: number;
 }
 
 /**
@@ -175,20 +185,21 @@ export async function listImages(): Promise<ImageEntry[]> {
 export function binPack(
   images: ImageEntry[],
   budgetBytes: number,
-): { include: ImageEntry[]; skip: ImageEntry[]; totalBytes: number } {
-  const sorted = images.toSorted((a, b) => b.size - a.size);
-  const include: ImageEntry[] = [];
-  const skip: ImageEntry[] = [];
-  let totalBytes = 0;
-  for (const img of sorted) {
-    if (totalBytes + img.size <= budgetBytes) {
-      include.push(img);
-      totalBytes += img.size;
-    } else {
-      skip.push(img);
-    }
-  }
-  return { include, skip, totalBytes };
+): BinPackResult {
+  return images
+    .toSorted((a, b) => b.size - a.size)
+    .reduce<BinPackResult>(
+      (packed, img) =>
+        packed.totalBytes + img.size <= budgetBytes
+          ? {
+              include: [...packed.include, img],
+              skip: packed.skip,
+              totalBytes: packed.totalBytes + img.size,
+            }
+          : // eslint-disable-next-line e18e/no-spread-in-reduce -- one runner holds a few dozen images, and each placement depends on the total packed so far
+            { ...packed, skip: [...packed.skip, img] },
+      { include: [], skip: [], totalBytes: 0 },
+    );
 }
 
 /**
@@ -264,6 +275,7 @@ export async function freeDisk(): Promise<void> {
     '/opt/hostedtoolcache/PyPy',
   ];
   const before = await freeDiskBytes('/');
+  // eslint-disable-next-line functional/no-loop-statements -- removals run one at a time so a failed plain rm falls back to sudo before the next path
   for (const p of PATHS) {
     try {
       await rm(p, { recursive: true, force: true });
@@ -291,13 +303,13 @@ export async function freeDisk(): Promise<void> {
  * formatBytes(1536); // '1.50KB'
  */
 export function formatBytes(n: number): string {
-  if (n < 1024) return `${n}B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let v = n / 1024;
-  let index = 0;
-  while (v >= 1024 && index < units.length - 1) {
-    v /= 1024;
-    index++;
+  if (n < 1024) {
+    return `${n}B`;
   }
-  return `${v.toFixed(2)}${units[index]}`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  const index = units.findIndex(
+    (_unit, position) =>
+      position === units.length - 1 || n / 1024 ** (position + 1) < 1024,
+  );
+  return `${TWO_DECIMALS.format(n / 1024 ** (index + 1))}${units[index]}`;
 }

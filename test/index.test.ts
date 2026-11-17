@@ -6,7 +6,7 @@ import { expect, jest, test } from '@jest/globals';
 import { run } from '../src/index.js';
 
 /** Matches the message the placeholder run logs. */
-const PLACEHOLDER_PATTERN = /no owned stages yet/;
+const PLACEHOLDER_PATTERN = /no owned stages yet/u;
 
 test('run() resolves without throwing', async () => {
   await expect(run()).resolves.toBeUndefined();
