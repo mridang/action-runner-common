@@ -16,9 +16,9 @@ test('run() logs the placeholder notice', async () => {
   const writes: string[] = [];
   const spy = jest
     .spyOn(process.stdout, 'write')
-    .mockImplementation((chunk: unknown) => {
+    .mockImplementation((chunk: string | Uint8Array): boolean => {
       writes.push(
-        typeof chunk === 'string' ? chunk : (chunk as Buffer).toString('utf8'),
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
       );
       return true;
     });
